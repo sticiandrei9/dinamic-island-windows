@@ -25,5 +25,8 @@ export function init(island) {
     island.refresh();
   }
 
-  tauri.event.listen('privacy', (e) => apply(e.payload));
+  tauri.event.listen('privacy', (e) => apply(e.payload))
+    .then(() => island.invoke('privacy_current'))
+    .then(apply)
+    .catch(() => {});
 }

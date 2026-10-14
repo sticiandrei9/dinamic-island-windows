@@ -41,11 +41,17 @@ test('volumul schimbat de mai multe ori e o singură activitate, actualizată ș
   assert.equal(current(q, 3600), null);
 });
 
-test('volumul nu sare peste o alertă care e afișată', () => {
+test('volumul trece în fața cozii (feedback imediat), alerta revine după el', () => {
   let q = [];
   q = enqueue(q, { kind: 'alert', title: 'A', duration: 3000 }, 0);
   q = enqueue(q, { kind: 'volume', level: 0.5, duration: 1500 }, 500);
-  assert.equal(current(q, 600).kind, 'alert');
-  q = advance(q, 3100);
-  assert.equal(current(q, 3100).kind, 'volume');
+  assert.equal(current(q, 600).kind, 'volume');
+  q = advance(q, 2100);
+  assert.equal(current(q, 2100).title, 'A');
+});
+
+test('cel mult 3 notificări în așteptare; cele mai vechi se pierd', () => {
+  let q = [];
+  for (let i = 1; i <= 6; i++) q = enqueue(q, { kind: 'notification', title: `n${i}`, duration: 5000 }, 0);
+  assert.deepEqual(q.map((a) => a.title), ['n1', 'n4', 'n5', 'n6']); // n1 e deja afișată
 });

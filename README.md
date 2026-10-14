@@ -11,7 +11,7 @@ A MacBook-notch-style island at the top center of your screen. It shows what's p
 ### Features
 
 - **Media:** Spotify, YouTube (Chrome/Edge/Firefox), VLC, Media Player and any app that reports to Windows. Shows cover art, title, artist and a draggable progress bar, with ⏮ ⏯ ⏭ controls. Click the cover or title to bring the playing app to the front.
-- **Synced lyrics** from [LRCLIB](https://lrclib.net) under the track, line by line.
+- **Synced lyrics** from [LRCLIB](https://lrclib.net) under the track, line by line. The title and artist of each track (including YouTube video titles) are sent to lrclib.net; turn off the Lyrics module to stop that.
 - **Live Activities:** a timer and stopwatch; when two things run at once (e.g. timer + music), the second one appears as a small bubble next to the island, like on iPhone.
 - **Alerts:** charger plugged in/out, low battery, Bluetooth headphones and devices connecting (with battery level).
 - **Volume and brightness** shown in the island. On Windows 11 the system volume pop-up stays visible too.
@@ -67,7 +67,7 @@ O insulă în stilul notch-ului de MacBook, sus pe centrul ecranului. Din ea vez
 ### Funcții
 
 - **Media:** Spotify, YouTube (Chrome/Edge/Firefox), VLC, Media Player și orice aplicație care se raportează la Windows. Ai copertă, titlu, artist și o bară de progres pe care o poți trage, plus butoanele ⏮ ⏯ ⏭. Click pe copertă sau titlu aduce în față aplicația care cântă.
-- **Versuri sincronizate** de pe [LRCLIB](https://lrclib.net), rând cu rând, sub piesă.
+- **Versuri sincronizate** de pe [LRCLIB](https://lrclib.net), rând cu rând, sub piesă. Titlul și artistul fiecărei piese (inclusiv titlurile video-urilor YouTube) sunt trimise la lrclib.net; oprește modulul Versuri dacă nu vrei asta.
 - **Activități ca pe iPhone:** timer și cronometru; când rulează două lucruri deodată (de ex. timer + muzică), al doilea apare ca o bulă mică lângă insulă.
 - **Alerte:** încărcător conectat/deconectat, baterie scăzută, căști și dispozitive Bluetooth conectate (cu nivelul bateriei).
 - **Volum și luminozitate** afișate în insulă. Pe Windows 11 rămâne vizibil și pop-up-ul de volum al sistemului.
@@ -123,7 +123,7 @@ Update-urile sunt acceptate doar dacă sunt semnate cu cheia privată din `%USER
 ### Возможности
 
 - **Медиа:** Spotify, YouTube (Chrome/Edge/Firefox), VLC, Медиаплеер и любое приложение, которое передаёт данные в Windows. Обложка, название, исполнитель, полоса прогресса, которую можно перетаскивать, и кнопки ⏮ ⏯ ⏭. Клик по обложке или названию выводит играющее приложение на передний план.
-- **Синхронизированные тексты песен** с [LRCLIB](https://lrclib.net), строка за строкой.
+- **Синхронизированные тексты песен** с [LRCLIB](https://lrclib.net), строка за строкой. Название и исполнитель каждой песни (включая названия видео YouTube) отправляются на lrclib.net; отключите модуль «Versuri», если не хотите этого.
 - **Активности как на iPhone:** таймер и секундомер; когда одновременно идут две вещи (например, таймер и музыка), вторая показывается маленьким пузырьком рядом с островком.
 - **Оповещения:** подключение/отключение зарядки, низкий заряд батареи, подключение Bluetooth-наушников и устройств (с уровнем заряда).
 - **Громкость и яркость** отображаются в островке. В Windows 11 системное окно громкости тоже остаётся видимым.

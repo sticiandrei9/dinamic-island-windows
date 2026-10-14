@@ -117,26 +117,32 @@ fn read_bluetooth() -> windows::core::Result<Vec<BtDevice>> {
     let sel = BluetoothDevice::GetDeviceSelectorFromPairingState(true)?;
     let list = await_op_for(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props)?, Duration::from_secs(10))?;
     for d in list {
-        let Ok(b) = await_op_for(BluetoothDevice::FromIdAsync(&d.Id()?)?, Duration::from_secs(5)) else { continue };
-        if b.ConnectionStatus()? != BluetoothConnectionStatus::Connected {
+        // un dispozitiv care dispare între timp e sărit, nu oprește toată lista
+        let Ok(id) = d.Id() else { continue };
+        let Ok(op) = BluetoothDevice::FromIdAsync(&id) else { continue };
+        let Ok(b) = await_op_for(op, Duration::from_secs(5)) else { continue };
+        if b.ConnectionStatus().ok() != Some(BluetoothConnectionStatus::Connected) {
             continue;
         }
-        let name = d.Name()?.to_string();
-        let cod = b.ClassOfDevice()?;
-        let kind = kind_for(cod.MajorClass()?.0, cod.MinorClass()?.0, &name);
-        out.push(BtDevice { id: d.Id()?.to_string(), kind: kind.into(), battery: prop::<u8>(&d, P_BATTERY), name });
+        let name = d.Name().map(|n| n.to_string()).unwrap_or_default();
+        let (major, minor) = b.ClassOfDevice().map(|c| (c.MajorClass().map_or(0, |m| m.0), c.MinorClass().map_or(0, |m| m.0))).unwrap_or((0, 0));
+        let kind = kind_for(major, minor, &name);
+        out.push(BtDevice { id: id.to_string(), kind: kind.into(), battery: prop::<u8>(&d, P_BATTERY), name });
     }
 
     let sel = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true)?;
     let list = await_op_for(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props)?, Duration::from_secs(10))?;
     for d in list {
-        let Ok(b) = await_op_for(BluetoothLEDevice::FromIdAsync(&d.Id()?)?, Duration::from_secs(5)) else { continue };
-        if b.ConnectionStatus()? != BluetoothConnectionStatus::Connected {
+        // un dispozitiv care dispare între timp e sărit, nu oprește toată lista
+        let Ok(id) = d.Id() else { continue };
+        let Ok(op) = BluetoothLEDevice::FromIdAsync(&id) else { continue };
+        let Ok(b) = await_op_for(op, Duration::from_secs(5)) else { continue };
+        if b.ConnectionStatus().ok() != Some(BluetoothConnectionStatus::Connected) {
             continue;
         }
-        let name = d.Name()?.to_string();
+        let name = d.Name().map(|n| n.to_string()).unwrap_or_default();
         let kind = kind_for(0, 0, &name);
-        out.push(BtDevice { id: d.Id()?.to_string(), kind: kind.into(), battery: prop::<u8>(&d, P_BATTERY), name });
+        out.push(BtDevice { id: id.to_string(), kind: kind.into(), battery: prop::<u8>(&d, P_BATTERY), name });
     }
     Ok(out)
 }
@@ -146,7 +152,7 @@ pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut power: Option<Power> = None;
         let mut bt: Option<Vec<BtDevice>> = None;
-        let mut bt_failed = false;
+        let mut bt_retry_at = std::time::Instant::now();
         let mut tick = 0u32;
         loop {
             std::thread::sleep(Duration::from_secs(2));
@@ -162,7 +168,7 @@ pub fn spawn(app: AppHandle) {
                 }
                 power = Some(cur);
             }
-            if tick % 2 == 0 && !bt_failed {
+            if tick % 2 == 0 && std::time::Instant::now() >= bt_retry_at {
                 match read_bluetooth() {
                     Ok(cur) => {
                         for a in bt_transition(bt.as_deref(), &cur) {
@@ -171,8 +177,8 @@ pub fn spawn(app: AppHandle) {
                         bt = Some(cur);
                     }
                     Err(e) => {
-                        log::warn!("Bluetooth indisponibil, alertele Bluetooth sunt oprite: {e}");
-                        bt_failed = true;
+                        log::warn!("Bluetooth indisponibil, reîncerc peste un minut: {e}");
+                        bt_retry_at = std::time::Instant::now() + Duration::from_secs(60);
                     }
                 }
             }

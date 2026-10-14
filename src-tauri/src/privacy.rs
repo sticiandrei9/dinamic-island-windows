@@ -56,6 +56,15 @@ pub fn hide_own_mirror(apps: Vec<String>, mirror_active: bool) -> Vec<String> {
     apps.into_iter().filter(|a| !a.eq_ignore_ascii_case("msedgewebview2")).collect()
 }
 
+/// Ultima stare emisă; o fereastră de insulă nou încărcată o cere (evenimentele de dinainte s-au pierdut).
+#[derive(Default)]
+pub struct LastPrivacy(pub std::sync::Mutex<Privacy>);
+
+#[tauri::command]
+pub fn privacy_current(state: tauri::State<LastPrivacy>) -> Privacy {
+    state.0.lock().unwrap().clone()
+}
+
 /// Oglinda e deschisă acum (anunțat de interfață).
 #[derive(Default)]
 pub struct MirrorActive(pub std::sync::atomic::AtomicBool);
@@ -108,6 +117,7 @@ pub fn spawn(app: AppHandle) {
             };
             if cur != last {
                 let _ = app.emit("privacy", &cur);
+                *app.state::<LastPrivacy>().0.lock().unwrap() = cur.clone();
                 last = cur;
             }
         }

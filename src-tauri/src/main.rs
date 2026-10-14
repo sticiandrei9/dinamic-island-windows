@@ -53,6 +53,7 @@ fn main() {
         .manage(timer::ClockState::default())
         .manage(lyrics::LyricsCache::default())
         .manage(privacy::MirrorActive::default())
+        .manage(privacy::LastPrivacy::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
             media::media_control,
@@ -68,6 +69,7 @@ fn main() {
             shelf::shelf_reveal,
             shelf::shelf_drag_out,
             privacy::set_mirror_active,
+            privacy::privacy_current,
             windows_list::list_windows,
             windows_list::focus_window,
             settings::get_settings,

@@ -12,15 +12,16 @@ export function layout(persistent) {
 // Adaugă o activitate tranzitorie. Volumul nu se adaugă de mai multe ori: activitatea existentă
 // e actualizată pe loc și, dacă e deja afișată, își reîncepe durata.
 export function enqueue(queue, activity, now) {
+  // volumul trece în fața cozii (feedback imediat); ce era afișat reîncepe după el
   if (activity.kind === 'volume') {
-    const i = queue.findIndex((a) => a.kind === 'volume');
-    if (i >= 0) {
-      const q = [...queue];
-      q[i] = { ...activity, startedAt: i === 0 ? now : undefined };
-      return q;
-    }
+    const rest = queue.filter((a) => a.kind !== 'volume').map((a) => ({ ...a, startedAt: undefined }));
+    return [{ ...activity, startedAt: now }, ...rest];
   }
-  return [...queue, { ...activity, startedAt: queue.length === 0 ? now : undefined }];
+  const q = [...queue, { ...activity, startedAt: queue.length === 0 ? now : undefined }];
+  // cel mult 3 notificări în așteptare (în afară de cea afișată): cele vechi se pierd
+  const waiting = q.slice(1).filter((a) => a.kind === 'notification');
+  const drop = new Set(waiting.slice(0, Math.max(0, waiting.length - 3)));
+  return q.filter((a) => !drop.has(a));
 }
 
 // Scoate tranzitoriile terminate; următoarea începe exact când s-a terminat precedenta.

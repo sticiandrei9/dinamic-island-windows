@@ -154,7 +154,7 @@ pub fn spawn(app: AppHandle) {
                 let state = app.state::<ClockState>();
                 let mut c = state.0.lock().unwrap();
                 let done = c.tick(now);
-                let clear = c.finished && finished_at.is_some_and(|t| now - t > 30_000);
+                let clear = c.finished && finished_at.is_some_and(|t| now.saturating_sub(t) > 30_000);
                 if clear {
                     c.dismiss();
                 }

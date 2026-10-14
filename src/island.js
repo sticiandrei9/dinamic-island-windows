@@ -48,6 +48,7 @@ let lastRectKey = '';
 let zoom = 1;
 let expandOnHover = true;
 let settings = null;
+let wasMediaOff = false;
 
 const persistent = new Map(); // id → activitate (media, timer…)
 let queue = []; // activități tranzitorii
@@ -317,6 +318,9 @@ function applySettings(st) {
   expandOnHover = st.expand_on !== 'click';
   document.body.classList.toggle('no-apps', !st.modules.apps);
   if (!st.modules.media && media.hasMedia()) media.update(null);
+  // repornit din setări: Rust emite doar la schimbări, deci cerem starea curentă
+  if (st.modules.media && wasMediaOff && tauri) invoke('media_current').then((i) => i && media.update(i)).catch(() => {});
+  wasMediaOff = !st.modules.media;
   renderTabs();
   window.dispatchEvent(new CustomEvent('island-settings', { detail: st }));
 }

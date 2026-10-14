@@ -147,9 +147,8 @@ pub fn spawn(app: AppHandle) {
             let enabled = app.state::<SettingsState>().get().modules.volume;
             if !enabled {
                 // modul oprit: renunțăm la callback și dăm înapoi OSD-ul Windows
-                endpoint = None;
-                if let Some(h) = osd.take() {
-                    unsafe { let _ = ShowWindow(h, SW_RESTORE); }
+                if endpoint.take().is_some() || osd.take().is_some() {
+                    restore_osd(); // îl caută din nou: poate a fost ascuns de o sesiune anterioară
                 }
                 std::thread::sleep(Duration::from_millis(500));
                 continue;

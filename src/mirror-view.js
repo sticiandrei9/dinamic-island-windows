@@ -52,6 +52,7 @@ export function init(island) {
   }
 
   function stop() {
+    gen++; // anulează un start() în curs
     clearTimeout(idle);
     if (stream) invoke('set_mirror_active', { active: false }).catch(() => {});
     stream?.getTracks().forEach((t) => t.stop()); // ledul camerei se stinge
@@ -64,12 +65,16 @@ export function init(island) {
     idle = setTimeout(() => { stop(); message('Oglinda s-a oprit după un minut. Apasă ca s-o pornești din nou.', true); }, IDLE_MS);
   }
 
+  let gen = 0;
   async function start(deviceId) {
     stop();
+    const my = ++gen;
     try {
       const video_c = { width: 640, height: 360, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) };
-      stream = await navigator.mediaDevices.getUserMedia({ video: video_c, audio: false });
-      if (!island.expanded) { stop(); return; } // insula s-a strâns între timp
+      const s = await navigator.mediaDevices.getUserMedia({ video: video_c, audio: false });
+      // între timp: alt start(), altă filă sau insula strânsă → camera se oprește imediat
+      if (my !== gen || !island.expanded || document.body.dataset.tab !== 'mirror') { s.getTracks().forEach((t) => t.stop()); return; }
+      stream = s;
       video.srcObject = stream;
       invoke('set_mirror_active', { active: true }).catch(() => {});
       box.classList.remove('off');

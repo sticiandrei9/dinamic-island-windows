@@ -149,7 +149,7 @@ pub fn run_check(app: &AppHandle) {
     let up = app.state::<Updater>();
     let Ok(_busy) = up.busy.try_lock() else { return };
     transition(app, UpdEvent::CheckStarted);
-    let was_ready = matches!(current_state(app), UpdateState::Ready { .. });
+    let was_ready = app.state::<Updater>().ready.lock().unwrap().is_some();
     let result = tauri::async_runtime::block_on(async {
         let Some(update) = app.updater_builder().timeout(NETWORK_TIMEOUT).build()?.check().await? else {
             return Ok::<_, tauri_plugin_updater::Error>(None);
@@ -193,11 +193,17 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
     };
     log::info!("aplic update-ul v{}", update.version);
     let _ = app.emit("update-installing", update.version.clone());
-    update.install(bytes).map_err(|e| {
-        log::warn!("instalarea a eșuat: {e}");
-        let _ = app.emit("update-failed", ());
-        e.to_string()
-    })
+    crate::volume::restore_osd(); // installerul închide aplicația fără RunEvent::Exit
+    match update.install(&bytes) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            log::warn!("instalarea a eșuat: {e}");
+            let _ = app.emit("update-failed", ());
+            // update-ul rămâne gata, ca „Aplică” să poată fi încercat din nou
+            *app.state::<Updater>().ready.lock().unwrap() = Some((update, bytes));
+            Err(e.to_string())
+        }
+    }
 }
 
 /// La pornire, înainte de crearea insulelor: un update descărcat dar neaplicat se instalează acum.
@@ -219,6 +225,7 @@ pub fn install_pending_at_startup(app: &AppHandle) {
             let (v, bytes) = pending.unwrap();
             log::info!("instalez la pornire update-ul descărcat v{v}");
             clear_pending(app);
+            crate::volume::restore_osd();
             if let Err(e) = remote.unwrap().install(bytes) {
                 log::warn!("instalarea la pornire a eșuat: {e}");
             }

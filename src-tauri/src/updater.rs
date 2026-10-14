@@ -3,6 +3,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
+/// Timeout pentru fiecare cerere a updater-ului (verificare și descărcare).
+pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
+
 pub fn next_delay(first: bool) -> Duration {
     if first { Duration::from_secs(30) } else { Duration::from_secs(6 * 3600) }
 }
@@ -26,7 +29,7 @@ pub fn spawn(app: AppHandle) {
 }
 
 async fn check_and_install(app: &AppHandle) -> tauri_plugin_updater::Result<()> {
-    if let Some(update) = app.updater()?.check().await? {
+    if let Some(update) = app.updater_builder().timeout(NETWORK_TIMEOUT).build()?.check().await? {
         let _ = app.emit("update-installing", update.version.clone());
         std::thread::sleep(Duration::from_secs(2));
         if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
@@ -42,6 +45,12 @@ async fn check_and_install(app: &AppHandle) -> tauri_plugin_updater::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn descarcarea_are_timeout() {
+        // o conexiune blocată nu poate ține insula la nesfârșit în „Actualizare la vX”
+        assert!(NETWORK_TIMEOUT > Duration::ZERO && NETWORK_TIMEOUT <= Duration::from_secs(300));
+    }
 
     #[test]
     fn prima_verificare_la_30s_apoi_la_6h() {

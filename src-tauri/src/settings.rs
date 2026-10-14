@@ -154,6 +154,7 @@ pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, settings
     let previous = std::mem::replace(&mut *state.current.lock().unwrap(), settings.clone());
     if previous.autostart != settings.autostart {
         crate::tray::apply_autostart(&app, settings.autostart);
+        crate::tray::refresh_autostart_item(&app, settings.autostart);
     }
     let _ = app.emit("settings-changed", &settings);
     // ferestrele se creează în afara thread-ului comenzii (crearea dintr-o comandă sincronă blochează)

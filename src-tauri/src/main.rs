@@ -32,6 +32,7 @@ fn main() {
         )
         .manage(hittest::IslandRects::default())
         .manage(media::LastMedia::default())
+        .manage(updater::Updater::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
             media::media_control,
@@ -42,6 +43,9 @@ fn main() {
             settings::set_settings,
             settings::open_log_dir,
             displays::list_monitors,
+            updater::get_update_state,
+            updater::check_updates_now,
+            updater::apply_update,
         ])
         .setup(|app| {
             log::info!("Dynamic Island {} pornit", app.package_info().version);
@@ -55,6 +59,7 @@ fn main() {
             tray::sync_autostart(app.handle(), loaded.autostart);
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
 
+            updater::install_pending_at_startup(app.handle());
             displays::sync_windows(app.handle());
             displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());

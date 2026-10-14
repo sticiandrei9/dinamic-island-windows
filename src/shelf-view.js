@@ -75,7 +75,7 @@ export function init(island) {
     c.addEventListener('pointermove', (e) => {
       if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
       start = null;
-      invoke('shelf_drag_out', { path: it.path }).catch(() => {});
+      invoke('shelf_drag_out', { path: it.path }).catch((err) => invoke('log_js', { msg: `raft: tragerea a eșuat: ${err}` }));
     });
     c.addEventListener('pointerup', () => { start = null; });
     c.addEventListener('dragstart', (e) => e.preventDefault());

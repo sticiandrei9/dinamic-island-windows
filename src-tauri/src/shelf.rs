@@ -137,11 +137,12 @@ pub fn shelf_reveal(path: String) -> Result<(), String> {
 pub fn shelf_drag_out(window: WebviewWindow, path: String) -> Result<(), String> {
     let png = crate::windows_list::file_icon_png(&path).unwrap_or_default();
     let image = if png.is_empty() { drag::Image::Raw(Vec::new()) } else { drag::Image::Raw(png) };
+    log::debug!("raft: încep tragerea în afară");
     drag::start_drag(
         &window,
         drag::DragItem::Files(vec![PathBuf::from(&path)]),
         image,
-        |_, _| {},
+        |result, _| log::debug!("raft: tragere terminată: {result:?}"),
         drag::Options::default(),
     )
     .map_err(|e| e.to_string())

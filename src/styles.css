@@ -28,6 +28,15 @@ body.expanded #shape { filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .35)); }
 #compact .art { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; }
 body:not(.has-media) #compact, body.expanded #compact { opacity: 0; filter: blur(6px); pointer-events: none; }
 
+/* ---------- actualizare ---------- */
+#update {
+  height: 32px; display: flex; align-items: center; justify-content: center;
+  transform: translateX(-50%); font-size: 12px; font-weight: 600; color: #30d158;
+  opacity: 0; transition: opacity .3s ease; white-space: nowrap; pointer-events: none;
+}
+body.updating #update { opacity: 1; }
+body.updating #compact { opacity: 0; }
+
 /* ---------- extins ---------- */
 #expanded {
   width: 420px; padding: 14px 22px 14px;

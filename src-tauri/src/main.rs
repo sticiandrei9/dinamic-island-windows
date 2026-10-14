@@ -4,6 +4,7 @@ mod hittest;
 mod media;
 mod platform;
 mod tray;
+mod updater;
 mod windows_list;
 
 use tauri::Manager;
@@ -13,6 +14,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(hittest::IslandRect::default())
         .manage(media::LastMedia::default())
         .invoke_handler(tauri::generate_handler![
@@ -31,6 +33,7 @@ fn main() {
             media::spawn(app.handle().clone());
             tray::enable_autostart_on_first_run(app);
             tray::setup(app)?;
+            updater::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

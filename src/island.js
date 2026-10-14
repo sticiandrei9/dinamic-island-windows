@@ -19,6 +19,7 @@ const invoke = (cmd, args) => (tauri ? tauri.core.invoke(cmd, args) : demoInvoke
 
 const pathEl = document.getElementById('shape-path');
 const compactEl = document.getElementById('compact');
+const updateEl = document.getElementById('update');
 
 // pornește de la lățime 0, deci insula „crește” la pornire
 const springs = { w: new Spring(0, SPRING), h: new Spring(32, SPRING), r: new Spring(10, SPRING) };
@@ -62,6 +63,7 @@ function render() {
   const w = springs.w.value, h = springs.h.value, r = springs.r.value;
   pathEl.setAttribute('d', islandPath(W, w, h, r, EAR));
   compactEl.style.width = `${Math.max(0, w)}px`;
+  updateEl.style.width = `${Math.max(0, w)}px`;
   rect = islandRect(W, Math.max(0, w), Math.max(0, h), EAR);
   const key = [rect.x, rect.w, rect.h].map(Math.round).join(',');
   if (key !== lastRectKey) {
@@ -108,6 +110,11 @@ if (tauri) {
     .then(() => invoke('media_current'))
     .then((info) => { if (info && !media.hasMedia()) media.update(info); })
     .catch(() => {});
+  tauri.event.listen('update-installing', (e) => {
+    document.getElementById('update').textContent = `Actualizare la v${e.payload}`;
+    document.body.classList.add('updating');
+    setExpanded(false);
+  });
   // ascunsă cât timp o aplicație rulează pe tot ecranul
   tauri.event.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);

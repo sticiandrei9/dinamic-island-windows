@@ -5,6 +5,7 @@ mod hittest;
 mod media;
 mod platform;
 mod settings;
+mod timer;
 mod tray;
 mod updater;
 mod windows_list;
@@ -33,6 +34,7 @@ fn main() {
         .manage(hittest::IslandRects::default())
         .manage(media::LastMedia::default())
         .manage(updater::Updater::default())
+        .manage(timer::ClockState::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
             media::media_control,
@@ -46,6 +48,8 @@ fn main() {
             updater::get_update_state,
             updater::check_updates_now,
             updater::apply_update,
+            timer::get_timer_state,
+            timer::timer_command,
         ])
         .setup(|app| {
             log::info!("Dynamic Island {} pornit", app.package_info().version);
@@ -64,6 +68,7 @@ fn main() {
             displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
+            timer::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
             if std::env::var_os("DI_OPEN_SETTINGS").is_some() {

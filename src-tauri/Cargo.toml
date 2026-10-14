@@ -25,6 +25,7 @@ features = [
   "Foundation",
   "Foundation_Collections",
   "Media_Control",
+  "Win32_Media_Audio",
   "Storage_Streams",
   "Win32_Foundation",
   "Win32_Graphics_Dwm",

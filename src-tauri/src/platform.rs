@@ -1,8 +1,9 @@
 use tauri::{PhysicalPosition, WebviewWindow};
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowLongPtrW, SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE,
-    WS_EX_NOACTIVATE,
+    GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE,
+    MONITORINFOF_PRIMARY, WS_EX_NOACTIVATE,
 };
 
 /// HWND-ul ferestrei Tauri, convertit în tipul din crate-ul nostru `windows`.
@@ -46,4 +47,60 @@ pub fn show_keep_focus(win: &WebviewWindow) -> tauri::Result<()> {
         }
     }
     Ok(())
+}
+
+
+pub fn cursor_pos() -> Option<(i32, i32)> {
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p).ok()? };
+    Some((p.x, p.y))
+}
+
+/// (left, top, right, bottom): fereastra acoperă tot monitorul.
+pub fn covers_monitor(win: (i32, i32, i32, i32), mon: (i32, i32, i32, i32)) -> bool {
+    win.0 <= mon.0 && win.1 <= mon.1 && win.2 >= mon.2 && win.3 >= mon.3
+}
+
+/// Aplicația din prim-plan rulează pe tot ecranul principal (video, joc)?
+pub fn foreground_is_fullscreen(own: Option<HWND>) -> bool {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() || Some(fg) == own {
+            return false;
+        }
+        let mut cls = [0u16; 64];
+        let n = GetClassNameW(fg, &mut cls).max(0) as usize;
+        let class = String::from_utf16_lossy(&cls[..n]);
+        if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd") {
+            return false;
+        }
+        let mut wr = RECT::default();
+        if GetWindowRect(fg, &mut wr).is_err() {
+            return false;
+        }
+        let mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
+        if mon.is_invalid() {
+            return false;
+        }
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(mon, &mut mi).as_bool() || mi.dwFlags & MONITORINFOF_PRIMARY == 0 {
+            return false;
+        }
+        let m = mi.rcMonitor;
+        covers_monitor((wr.left, wr.top, wr.right, wr.bottom), (m.left, m.top, m.right, m.bottom))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fullscreen_detectat() {
+        let mon = (0, 0, 1920, 1080);
+        assert!(covers_monitor((0, 0, 1920, 1080), mon));
+        assert!(covers_monitor((-8, -8, 1928, 1088), mon)); // ferestre cu margini în afara ecranului
+        assert!(!covers_monitor((0, 0, 1920, 1040), mon)); // maximizat, cu taskbar vizibil
+        assert!(!covers_monitor((100, 100, 800, 600), mon));
+    }
 }

@@ -318,7 +318,7 @@ pub fn spawn(app: AppHandle) {
             let manager = match request_manager() {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("GSMTC indisponibil: {e}");
+                    log::warn!("GSMTC indisponibil: {e}");
                     std::thread::sleep(Duration::from_secs(5));
                     continue;
                 }

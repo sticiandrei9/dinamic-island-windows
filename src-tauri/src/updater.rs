@@ -22,7 +22,7 @@ pub fn spawn(app: AppHandle) {
             std::thread::sleep(next_delay(first));
             first = false;
             if let Err(e) = tauri::async_runtime::block_on(check_and_install(&app)) {
-                eprintln!("actualizare eșuată: {e}");
+                log::warn!("actualizare eșuată: {e}");
             }
         }
     });

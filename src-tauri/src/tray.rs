@@ -28,17 +28,21 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// La prima pornire a build-ului release, activează pornirea cu Windows.
-pub fn enable_autostart_on_first_run(app: &App) {
+/// La pornire (release): registrul urmează setarea `autostart` (implicit pornită).
+pub fn sync_autostart(app: &tauri::AppHandle, wanted: bool) {
     if cfg!(debug_assertions) {
         return;
     }
-    let Ok(dir) = app.path().app_config_dir() else { return };
-    let marker = dir.join("first-run-done");
-    if marker.exists() {
+    if app.autolaunch().is_enabled().unwrap_or(!wanted) != wanted {
+        apply_autostart(app, wanted);
+    }
+}
+
+/// Aplică setarea „Pornește cu Windows” în registru (doar în build-ul release).
+pub fn apply_autostart(app: &tauri::AppHandle, on: bool) {
+    if cfg!(debug_assertions) {
         return;
     }
-    let _ = app.autolaunch().enable();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(marker, b"1");
+    let al = app.autolaunch();
+    let _ = if on { al.enable() } else { al.disable() };
 }

@@ -23,6 +23,20 @@ export function assetName(version) {
   return `DynamicIsland_${version}_x64-setup.exe`;
 }
 
+export const VERSION_FILES = ['package.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json'];
+
+// Ce rulezi ca să repari un release oprit la jumătate, în funcție de pasul care a eșuat.
+export function recoveryHint(stage, version, repo) {
+  const release = `gh release create v${version} dist-release/${assetName(version)} dist-release/latest.json --repo ${repo} --title v${version}`;
+  if (stage === 'build') {
+    return `Build-ul a eșuat. Readu fișierele de versiune:\n  git checkout -- ${VERSION_FILES.join(' ')} src-tauri/Cargo.lock`;
+  }
+  if (stage === 'push') {
+    return `Commit-ul și tag-ul v${version} există local. Termină publicarea (fără rebuild):\n  git push --atomic origin main v${version}\n  ${release}`;
+  }
+  return `Codul și tag-ul sunt pe GitHub, dar release-ul nu. Creează-l:\n  ${release}`;
+}
+
 // Formatul `latest.json` citit de tauri-plugin-updater.
 export function manifest({ version, notes, pubDate, signature, repo, baseUrl }) {
   const base = baseUrl ?? `https://github.com/${repo}/releases/download/v${version}`;

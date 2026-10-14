@@ -1,6 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateVersion, setVersion, assetName, manifest } from '../scripts/release-lib.mjs';
+import { validateVersion, setVersion, assetName, manifest, recoveryHint } from '../scripts/release-lib.mjs';
+
+test('după un build eșuat, indicația readuce fișierele de versiune', () => {
+  const h = recoveryHint('build', '0.2.0', 'u/r');
+  assert.match(h, /git checkout -- package\.json src-tauri\/Cargo\.toml src-tauri\/tauri\.conf\.json src-tauri\/Cargo\.lock/);
+});
+
+test('după un push eșuat, indicația termină publicarea fără rebuild', () => {
+  const h = recoveryHint('push', '0.2.0', 'u/r');
+  assert.match(h, /git push --atomic origin main v0\.2\.0/);
+  assert.match(h, /gh release create v0\.2\.0 dist-release\/DynamicIsland_0\.2\.0_x64-setup\.exe dist-release\/latest\.json --repo u\/r/);
+});
+
+test('după un gh eșuat, indicația doar creează release-ul', () => {
+  const h = recoveryHint('release', '0.2.0', 'u/r');
+  assert.doesNotMatch(h, /git push/);
+  assert.match(h, /gh release create v0\.2\.0/);
+});
 
 test('validateVersion acceptă doar semver mai mare', () => {
   assert.doesNotThrow(() => validateVersion('0.2.0', '0.1.0'));

@@ -170,6 +170,12 @@ pub fn open_log_dir(app: AppHandle) -> Result<(), String> {
     std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Erorile din interfață (JS), scrise în log-ul aplicației.
+#[tauri::command]
+pub fn log_js(msg: String) {
+    log::warn!("JS: {msg}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

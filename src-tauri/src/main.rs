@@ -4,6 +4,7 @@ mod alerts;
 mod dev_demo;
 mod displays;
 mod hittest;
+mod lyrics;
 mod media;
 mod notifications;
 mod platform;
@@ -40,17 +41,20 @@ fn main() {
         .manage(media::LastMedia::default())
         .manage(updater::Updater::default())
         .manage(timer::ClockState::default())
+        .manage(lyrics::LyricsCache::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
             media::media_control,
             media::media_current,
             media::media_seek,
             media::media_open_source,
+            lyrics::get_lyrics,
             windows_list::list_windows,
             windows_list::focus_window,
             settings::get_settings,
             settings::set_settings,
             settings::open_log_dir,
+            settings::log_js,
             displays::list_monitors,
             updater::get_update_state,
             updater::check_updates_now,

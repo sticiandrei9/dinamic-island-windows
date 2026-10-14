@@ -376,9 +376,19 @@ renderTabs();
 retarget();
 
 // modulele noi se încarcă după ce API-ul insulei există
-for (const mod of ['./timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './shelf-view.js', './mirror-view.js']) {
-  import(mod).then((m) => m.init?.(island)).catch(() => {});
+for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './shelf-view.js', './mirror-view.js']) {
+  import(mod)
+    .then((m) => m.init?.(island))
+    .catch((e) => { if (!String(e).includes('Failed to fetch')) logJs(`${mod}: ${e?.stack ?? e}`); });
 }
+
+// erorile JS ajung în log-ul aplicației (altfel s-ar pierde în webview)
+function logJs(msg) {
+  console.error(msg);
+  if (tauri) invoke('log_js', { msg: String(msg).slice(0, 2000) }).catch(() => {});
+}
+window.addEventListener('error', (e) => logJs(`${e.message} @ ${e.filename}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) => logJs(`promisiune respinsă: ${e.reason?.stack ?? e.reason}`));
 
 // ---------------- mod demo (doar în browser, pentru verificat designul) ----------------
 function demoArt(hue) {

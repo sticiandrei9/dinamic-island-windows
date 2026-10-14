@@ -237,3 +237,14 @@ body:not(.playing) .viz i { animation: none; transform: scaleY(.2); }
 .pill-btn.green { background: rgba(48, 209, 88, .22); color: var(--green); }
 .pill-btn.red { background: rgba(255, 69, 58, .2); color: var(--red); }
 .pill-btn:disabled { opacity: .4; cursor: default; }
+
+/* ---------- versuri ---------- */
+.lyrics { display: none; margin-top: 10px; text-align: center; overflow: hidden; }
+body.has-lyrics .lyrics { display: block; }
+.ly-cur, .ly-next { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ly-cur { font-size: 14px; font-weight: 600; color: #fff; letter-spacing: -.1px; }
+.ly-next { font-size: 12px; color: #636366; margin-top: 2px; }
+.lyrics.change .ly-cur { animation: ly-up .45s cubic-bezier(.2, 1.1, .4, 1); }
+.lyrics.change .ly-next { animation: ly-in .45s ease; }
+@keyframes ly-up { from { opacity: 0; transform: translateY(10px); filter: blur(3px); } }
+@keyframes ly-in { from { opacity: 0; } }

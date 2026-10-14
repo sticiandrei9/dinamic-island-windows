@@ -1,0 +1,51 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { layout, enqueue, advance, current } from '../src/lib/activities.js';
+
+const media = { id: 'media', kind: 'media' };
+const timer = { id: 'timer', kind: 'timer' };
+
+test('fără activități: pastila goală, fără bulă', () => {
+  assert.deepEqual(layout([]), { pill: null, bubble: null });
+});
+
+test('o singură activitate ocupă pastila', () => {
+  assert.deepEqual(layout([media]), { pill: media, bubble: null });
+});
+
+test('timerul are prioritate; media trece în bulă', () => {
+  assert.deepEqual(layout([media, timer]), { pill: timer, bubble: media });
+});
+
+test('tranzitoriile se afișează pe rând', () => {
+  let q = [];
+  q = enqueue(q, { kind: 'alert', title: 'A', duration: 3000 }, 0);
+  q = enqueue(q, { kind: 'alert', title: 'B', duration: 3000 }, 100);
+  assert.equal(current(q, 1000).title, 'A');
+  q = advance(q, 3100);
+  assert.equal(current(q, 3100).title, 'B');
+  q = advance(q, 6200);
+  assert.equal(current(q, 6200), null);
+});
+
+test('volumul schimbat de mai multe ori e o singură activitate, actualizată și prelungită', () => {
+  let q = [];
+  q = enqueue(q, { kind: 'volume', level: 0.2, duration: 1500 }, 0);
+  q = enqueue(q, { kind: 'volume', level: 0.3, duration: 1500 }, 1000);
+  q = enqueue(q, { kind: 'volume', level: 0.4, duration: 1500 }, 2000);
+  assert.equal(q.length, 1);
+  assert.equal(current(q, 2000).level, 0.4);
+  q = advance(q, 3000); // 1000 ms după ultima schimbare: încă vizibil
+  assert.equal(current(q, 3000).level, 0.4);
+  q = advance(q, 3600);
+  assert.equal(current(q, 3600), null);
+});
+
+test('volumul nu sare peste o alertă care e afișată', () => {
+  let q = [];
+  q = enqueue(q, { kind: 'alert', title: 'A', duration: 3000 }, 0);
+  q = enqueue(q, { kind: 'volume', level: 0.5, duration: 1500 }, 500);
+  assert.equal(current(q, 600).kind, 'alert');
+  q = advance(q, 3100);
+  assert.equal(current(q, 3100).kind, 'volume');
+});

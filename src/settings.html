@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <title>Setări — Dynamic Island</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div class="app-icon"><span></span></div>
+      <div>
+        <h1>Dynamic Island</h1>
+        <p class="sub" id="version">Versiunea —</p>
+      </div>
+    </header>
+
+    <h2>Module</h2>
+    <section class="group" id="modules"></section>
+
+    <h2>Comportament</h2>
+    <section class="group">
+      <div class="row">
+        <div class="label">Extinde insula<small>Cum se deschide insula mare</small></div>
+        <div class="segmented" data-key="expand_on">
+          <button data-value="hover">La hover</button>
+          <button data-value="click">Doar la click</button>
+        </div>
+      </div>
+    </section>
+
+    <h2>Afișare</h2>
+    <section class="group">
+      <div class="row">
+        <div class="label">Monitor<small>Pe ce ecran apare insula</small></div>
+        <select id="monitor"></select>
+      </div>
+      <div class="row">
+        <div class="label">Mărime</div>
+        <div class="segmented" data-key="size">
+          <button data-value="small">Mică</button>
+          <button data-value="normal">Normală</button>
+          <button data-value="large">Mare</button>
+        </div>
+      </div>
+    </section>
+
+    <h2>Pornire și actualizări</h2>
+    <section class="group">
+      <div class="row">
+        <div class="label">Pornește cu Windows</div>
+        <label class="switch"><input type="checkbox" data-key="autostart" /><span></span></label>
+      </div>
+      <div class="row">
+        <div class="label">Verifică automat actualizările<small>La pornire și apoi la fiecare 6 ore. Update-ul se descarcă singur; îl aplici tu.</small></div>
+        <label class="switch"><input type="checkbox" data-key="auto_update" /><span></span></label>
+      </div>
+      <div class="row">
+        <div class="label" id="update-status">Nicio verificare încă</div>
+        <div class="buttons">
+          <button class="btn" id="check-now">Verifică acum</button>
+          <button class="btn primary" id="apply" hidden>Aplică</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="label">Jurnal<small>Erorile și evenimentele importante, pentru depanare</small></div>
+        <button class="btn" id="open-logs">Deschide folderul</button>
+      </div>
+    </section>
+
+    <p class="footnote">Notificările Windows sunt citite de pe ecran (prin accesibilitate): cele afișate în modul „Nu deranja” sau în fullscreen nu apar, iar unele aplicații pot fi ratate.</p>
+  </main>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

@@ -37,7 +37,10 @@ const media = new MediaView({ invoke, onChange: retarget });
 const apps = new AppsView({ invoke, onPicked: () => setExpanded(false) });
 
 function targetSize() {
-  if (expanded) return media.hasMedia() ? SIZES.expandedMedia : SIZES.expandedIdle;
+  if (expanded) {
+    const base = media.hasMedia() ? SIZES.expandedMedia : SIZES.expandedIdle;
+    return document.body.classList.contains('has-update') ? { ...base, h: base.h + 26 } : base;
+  }
   return media.hasMedia() ? SIZES.active : SIZES.idle;
 }
 
@@ -136,6 +139,27 @@ if (tauri) {
     setExpanded(false);
   });
   tauri.event.listen('update-failed', () => document.body.classList.remove('updating'));
+  // update descărcat: anunț scurt în pastilă + rândul „Aplică” în insula extinsă
+  let announced = '';
+  const onUpdateState = (st) => {
+    const ready = st?.kind === 'ready';
+    document.getElementById('x-update').hidden = !ready;
+    document.body.classList.toggle('has-update', ready);
+    if (!ready) return;
+    document.getElementById('x-update-text').textContent = `v${st.version} disponibilă`;
+    if (announced === st.version) return;
+    announced = st.version;
+    updateEl.textContent = `Actualizare disponibilă v${st.version}`;
+    document.body.classList.add('updating');
+    setTimeout(() => document.body.classList.remove('updating'), 4000);
+    retarget();
+  };
+  tauri.event.listen('update-state', (e) => onUpdateState(e.payload));
+  invoke('get_update_state').then(onUpdateState).catch(() => {});
+  document.getElementById('x-update-apply').addEventListener('click', (e) => {
+    e.stopPropagation();
+    invoke('apply_update').catch(() => {});
+  });
   // ascunsă cât timp o aplicație rulează pe tot ecranul
   self.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);

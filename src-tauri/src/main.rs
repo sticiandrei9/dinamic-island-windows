@@ -66,6 +66,9 @@ fn main() {
             media::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
+            if std::env::var_os("DI_OPEN_SETTINGS").is_some() {
+                tray::open_settings(app.handle()); // pentru teste: deschide setările la pornire
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

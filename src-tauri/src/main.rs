@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod alerts;
+mod dev_demo;
 mod displays;
 mod hittest;
 mod media;
@@ -71,6 +73,8 @@ fn main() {
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());
+            alerts::spawn(app.handle().clone());
+            dev_demo::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
             if std::env::var_os("DI_OPEN_SETTINGS").is_some() {

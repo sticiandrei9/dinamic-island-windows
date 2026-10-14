@@ -15,6 +15,7 @@ export const ICONS = {
   speakerDevice: svg('<rect x="6" y="2.5" width="12" height="19" rx="3"/><circle cx="12" cy="14.5" r="3.2"/><circle cx="12" cy="7" r="1"/>'),
   mouse: svg('<rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v3"/>'),
   keyboard: svg('<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M8 14h8"/>'),
+  gamepad: svg('<path d="M7 7h10a5 5 0 0 1 4.8 6.4l-1 3.4a2.5 2.5 0 0 1-4.3.9L14.6 15H9.4l-1.9 2.7a2.5 2.5 0 0 1-4.3-.9l-1-3.4A5 5 0 0 1 7 7z"/><path d="M7.5 10v3M6 11.5h3"/><circle cx="16" cy="11" r=".6" fill="currentColor"/><circle cx="17.5" cy="12.8" r=".6" fill="currentColor"/>'),
   bluetooth: svg('<path d="m7 7 10 10-5 4.5V2.5L17 7 7 17"/>'),
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>'),
   bell: svg('<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),

@@ -43,3 +43,9 @@ export function dominantColor(rgba) {
 export function sizeScale(size) {
   return { small: 0.85, normal: 1, large: 1.15 }[size] ?? 1;
 }
+
+// Câte unde are pictograma difuzorului (0–3), ca pe iPhone.
+export function waveLevel(level, muted) {
+  if (muted || level <= 0) return 0;
+  return level < 0.34 ? 1 : level < 0.67 ? 2 : 3;
+}

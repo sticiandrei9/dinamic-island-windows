@@ -1,0 +1,255 @@
+use std::time::Duration;
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
+use windows::core::{IInspectable, Interface, HSTRING};
+use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice};
+use windows::Devices::Enumeration::DeviceInformation;
+use windows::Foundation::Collections::IIterable;
+use windows::Foundation::IReference;
+use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+
+use crate::media::await_op_for;
+use crate::settings::SettingsState;
+
+/// O alertă afișată ca activitate tranzitorie în insulă.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Alert {
+    pub icon: String,
+    pub title: String,
+    pub detail: String,
+    pub color: String,
+    pub level: Option<f64>,
+}
+
+fn alert(icon: &str, title: &str, detail: String, color: &str, level: Option<f64>) -> Alert {
+    Alert { icon: icon.into(), title: title.into(), detail, color: color.into(), level }
+}
+
+// ---------------- baterie și încărcător ----------------
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Power {
+    pub has_battery: bool,
+    pub ac: bool,
+    pub percent: u8,
+}
+
+pub fn power_transition(prev: Option<&Power>, cur: &Power) -> Option<Alert> {
+    let prev = prev?;
+    if !cur.has_battery || cur.percent > 100 {
+        return None;
+    }
+    let pct = format!("{}%", cur.percent);
+    let level = Some(cur.percent as f64 / 100.0);
+    if cur.ac && !prev.ac {
+        return Some(alert("bolt", "Se încarcă", pct, "var(--green)", level));
+    }
+    if !cur.ac && prev.ac {
+        return Some(alert("battery", "Pe baterie", pct, "var(--fg)", level));
+    }
+    let crossed = |t: u8| prev.percent > t && cur.percent <= t;
+    if !cur.ac && (crossed(20) || crossed(10)) {
+        return Some(alert("battery", "Baterie scăzută", pct, "var(--red)", level));
+    }
+    None
+}
+
+fn read_power() -> Option<Power> {
+    let mut s = SYSTEM_POWER_STATUS::default();
+    unsafe { GetSystemPowerStatus(&mut s).ok()? };
+    Some(Power { has_battery: s.BatteryFlag & 128 == 0 && s.BatteryFlag != 255, ac: s.ACLineStatus == 1, percent: s.BatteryLifePercent })
+}
+
+// ---------------- Bluetooth ----------------
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BtDevice {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub battery: Option<u8>,
+}
+
+/// Tipul dispozitivului: clasa Bluetooth (audio → căști, periferic → controller) plus numele ca indiciu,
+/// pentru că WinRT nu spune direct dacă un periferic e mouse sau tastatură.
+pub fn kind_for(major: i32, minor: i32, name: &str) -> &'static str {
+    let n = name.to_lowercase();
+    match major {
+        4 => "headphones",
+        5 if n.contains("keyboard") || n.contains("keys") || n.contains("tastatur") => "keyboard",
+        5 if n.contains("mouse") || n.contains("mx master") || n.contains("mice") => "mouse",
+        5 if minor == 1 || minor == 2 => "gamepad",
+        _ => "bluetooth",
+    }
+}
+
+pub fn bt_transition(prev: Option<&[BtDevice]>, cur: &[BtDevice]) -> Vec<Alert> {
+    let Some(prev) = prev else { return Vec::new() };
+    let mut out = Vec::new();
+    for d in cur.iter().filter(|d| !prev.iter().any(|p| p.id == d.id)) {
+        let detail = match d.battery {
+            Some(b) => format!("Conectat · {b}%"),
+            None => "Conectat".into(),
+        };
+        out.push(alert(&d.kind, &d.name, detail, "var(--fg)", d.battery.map(|b| b as f64 / 100.0)));
+    }
+    for d in prev.iter().filter(|p| !cur.iter().any(|d| d.id == p.id)) {
+        out.push(alert(&d.kind, &d.name, "Deconectat".into(), "var(--fg2)", None));
+    }
+    out
+}
+
+const P_BATTERY: &str = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
+
+fn prop<T: windows::core::RuntimeType + 'static>(d: &DeviceInformation, key: &str) -> Option<T> {
+    let v: IInspectable = d.Properties().ok()?.Lookup(&HSTRING::from(key)).ok()?;
+    v.cast::<IReference<T>>().ok()?.Value().ok()
+}
+
+/// Dispozitivele Bluetooth împerecheate și conectate acum (clasic + Low Energy).
+/// Lista împerecheate vine din registrul de dispozitive (rapid); o căutare de tip
+/// AssociationEndpoint ar scana după dispozitive noi și ar dura zeci de secunde.
+fn read_bluetooth() -> windows::core::Result<Vec<BtDevice>> {
+    let props: IIterable<HSTRING> = vec![HSTRING::from(P_BATTERY)].try_into()?;
+    let mut out = Vec::new();
+
+    let sel = BluetoothDevice::GetDeviceSelectorFromPairingState(true)?;
+    let list = await_op_for(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props)?, Duration::from_secs(10))?;
+    for d in list {
+        let Ok(b) = await_op_for(BluetoothDevice::FromIdAsync(&d.Id()?)?, Duration::from_secs(5)) else { continue };
+        if b.ConnectionStatus()? != BluetoothConnectionStatus::Connected {
+            continue;
+        }
+        let name = d.Name()?.to_string();
+        let cod = b.ClassOfDevice()?;
+        let kind = kind_for(cod.MajorClass()?.0, cod.MinorClass()?.0, &name);
+        out.push(BtDevice { id: d.Id()?.to_string(), kind: kind.into(), battery: prop::<u8>(&d, P_BATTERY), name });
+    }
+
+    let sel = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true)?;
+    let list = await_op_for(DeviceInformation::FindAllAsyncAqsFilterAndAdditionalProperties(&sel, &props)?, Duration::from_secs(10))?;
+    for d in list {
+        let Ok(b) = await_op_for(BluetoothLEDevice::FromIdAsync(&d.Id()?)?, Duration::from_secs(5)) else { continue };
+        if b.ConnectionStatus()? != BluetoothConnectionStatus::Connected {
+            continue;
+        }
+        let name = d.Name()?.to_string();
+        let kind = kind_for(0, 0, &name);
+        out.push(BtDevice { id: d.Id()?.to_string(), kind: kind.into(), battery: prop::<u8>(&d, P_BATTERY), name });
+    }
+    Ok(out)
+}
+
+/// Baterie la 2 s, Bluetooth la 4 s; emite `alert` pentru fiecare schimbare.
+pub fn spawn(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut power: Option<Power> = None;
+        let mut bt: Option<Vec<BtDevice>> = None;
+        let mut bt_failed = false;
+        let mut tick = 0u32;
+        loop {
+            std::thread::sleep(Duration::from_secs(2));
+            tick += 1;
+            if !app.state::<SettingsState>().get().modules.alerts {
+                power = None;
+                bt = None;
+                continue;
+            }
+            if let Some(cur) = read_power() {
+                if let Some(a) = power_transition(power.as_ref(), &cur) {
+                    let _ = app.emit("alert", &a);
+                }
+                power = Some(cur);
+            }
+            if tick % 2 == 0 && !bt_failed {
+                match read_bluetooth() {
+                    Ok(cur) => {
+                        for a in bt_transition(bt.as_deref(), &cur) {
+                            let _ = app.emit("alert", &a);
+                        }
+                        bt = Some(cur);
+                    }
+                    Err(e) => {
+                        log::warn!("Bluetooth indisponibil, alertele Bluetooth sunt oprite: {e}");
+                        bt_failed = true;
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(ac: bool, pct: u8) -> Power {
+        Power { has_battery: true, ac, percent: pct }
+    }
+
+    #[test]
+    fn fara_alerta_la_pornire_sau_fara_baterie() {
+        assert!(power_transition(None, &p(true, 50)).is_none());
+        let desktop = Power { has_battery: false, ac: true, percent: 255 };
+        assert!(power_transition(Some(&desktop), &Power { ac: false, ..desktop.clone() }).is_none());
+    }
+
+    #[test]
+    fn incarcator_conectat_si_deconectat() {
+        let a = power_transition(Some(&p(false, 64)), &p(true, 64)).unwrap();
+        assert_eq!((a.icon.as_str(), a.title.as_str(), a.detail.as_str()), ("bolt", "Se încarcă", "64%"));
+        let b = power_transition(Some(&p(true, 64)), &p(false, 64)).unwrap();
+        assert_eq!(b.title, "Pe baterie");
+    }
+
+    #[test]
+    fn baterie_scazuta_la_20_si_10_o_singura_data() {
+        assert_eq!(power_transition(Some(&p(false, 21)), &p(false, 20)).unwrap().title, "Baterie scăzută");
+        assert!(power_transition(Some(&p(false, 20)), &p(false, 19)).is_none());
+        assert_eq!(power_transition(Some(&p(false, 11)), &p(false, 10)).unwrap().detail, "10%");
+        assert!(power_transition(Some(&p(true, 21)), &p(true, 20)).is_none()); // la încărcător nu
+    }
+
+    fn dev(id: &str, name: &str, kind: &str, battery: Option<u8>) -> BtDevice {
+        BtDevice { id: id.into(), name: name.into(), kind: kind.into(), battery }
+    }
+
+    #[test]
+    fn bluetooth_conectat_si_deconectat() {
+        let before = vec![dev("1", "Mouse", "mouse", None)];
+        let after = vec![dev("1", "Mouse", "mouse", None), dev("2", "AirPods Pro", "headphones", Some(80))];
+        let alerts = bt_transition(Some(&before), &after);
+        assert_eq!(alerts.len(), 1);
+        assert_eq!((alerts[0].icon.as_str(), alerts[0].title.as_str(), alerts[0].detail.as_str()), ("headphones", "AirPods Pro", "Conectat · 80%"));
+        assert_eq!(alerts[0].level, Some(0.8));
+        let gone = bt_transition(Some(&after), &before);
+        assert_eq!(gone[0].detail, "Deconectat");
+        assert!(bt_transition(None, &after).is_empty()); // prima citire: fără alerte
+    }
+
+    #[test]
+    fn tipul_dispozitivului_din_clasa_bluetooth() {
+        assert_eq!(kind_for(4, 6, "AirPods Pro 3"), "headphones");
+        assert_eq!(kind_for(5, 2, "DualSense Wireless Controller"), "gamepad");
+        assert_eq!(kind_for(5, 0, "MX Keys"), "keyboard");
+        assert_eq!(kind_for(5, 0, "Logitech Mouse"), "mouse");
+        assert_eq!(kind_for(1, 0, "Laptop"), "bluetooth");
+    }
+
+    /// Rulează doar manual (`cargo test -- --ignored`): bateria și dispozitivele Bluetooth reale.
+    #[test]
+    #[ignore]
+    fn citeste_dispozitivele_reale() {
+        println!("baterie: {:?}", read_power());
+        match read_bluetooth() {
+            Ok(list) => {
+                println!("Bluetooth conectate: {}", list.len());
+                for d in list {
+                    println!("  {} [{}] baterie={:?}", d.name, d.kind, d.battery);
+                }
+            }
+            Err(e) => println!("Bluetooth: eroare {e}"),
+        }
+    }
+}

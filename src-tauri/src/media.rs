@@ -129,14 +129,18 @@ pub fn wait_until<T>(mut poll: impl FnMut() -> Option<windows::core::Result<T>>,
     }
 }
 
-fn await_op<T: RuntimeType + 'static>(op: IAsyncOperation<T>) -> windows::core::Result<T> {
+pub(crate) fn await_op<T: RuntimeType + 'static>(op: IAsyncOperation<T>) -> windows::core::Result<T> {
+    await_op_for(op, WINRT_TIMEOUT)
+}
+
+pub(crate) fn await_op_for<T: RuntimeType + 'static>(op: IAsyncOperation<T>, timeout: Duration) -> windows::core::Result<T> {
     let r = wait_until(
         || match op.Status() {
             Ok(AsyncStatus::Started) => None,
             Ok(_) => Some(op.GetResults()),
             Err(e) => Some(Err(e)),
         },
-        WINRT_TIMEOUT,
+        timeout,
     );
     if r.is_err() {
         let _ = op.Cancel();

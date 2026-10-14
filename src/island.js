@@ -209,6 +209,7 @@ function renderTransient(t) {
     ring.classList.toggle('on', typeof t.level === 'number');
     if (typeof t.level === 'number') ring.querySelector('.fg').style.strokeDashoffset = `${56.5 * (1 - t.level)}`;
   } else if (t.kind === 'volume') {
+    transientEl.style.setProperty('--t-color', 'var(--fg)');
     $('v-icon').innerHTML = t.source === 'brightness' ? ICONS.sun : speakerIcon(t.waves ?? 2, t.muted);
     $('v-fill').style.width = `${Math.round((t.muted ? 0 : t.level) * 100)}%`;
     $('v-pct').textContent = t.muted ? '—' : `${Math.round(t.level * 100)}%`;

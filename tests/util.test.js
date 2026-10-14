@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTime, currentPosition, dominantColor, sizeScale } from '../src/lib/util.js';
+import { formatTime, currentPosition, dominantColor, sizeScale, waveLevel } from '../src/lib/util.js';
 
 test('formatTime', () => {
   assert.equal(formatTime(0), '0:00');
@@ -38,4 +38,12 @@ test('sizeScale: mică / normală / mare, necunoscut → normală', () => {
   assert.equal(sizeScale('normal'), 1);
   assert.equal(sizeScale('large'), 1.15);
   assert.equal(sizeScale('urias'), 1);
+});
+
+test('waveLevel: undele difuzorului după volum', () => {
+  assert.equal(waveLevel(0, false), 0);
+  assert.equal(waveLevel(0.2, false), 1);
+  assert.equal(waveLevel(0.5, false), 2);
+  assert.equal(waveLevel(0.9, false), 3);
+  assert.equal(waveLevel(0.9, true), 0);
 });

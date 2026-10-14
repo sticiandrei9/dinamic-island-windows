@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,6 +12,8 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionMediaProperties as Props,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
+use windows::core::RuntimeType;
+use windows::Foundation::{AsyncStatus, IAsyncOperation};
 use windows::Storage::Streams::DataReader;
 use windows::Win32::Foundation::E_FAIL;
 
@@ -23,6 +27,9 @@ pub struct MediaInfo {
     pub position: f64,
     pub duration: f64,
     pub source: String,
+    /// identificatorul sesiunii Windows; nu ajunge în interfață
+    #[serde(skip)]
+    pub aumid: String,
 }
 
 const TICKS_PER_SEC: f64 = 10_000_000.0;
@@ -77,9 +84,64 @@ pub fn should_emit(prev: &Option<MediaInfo>, cur: &Option<MediaInfo>, secs_since
     }
 }
 
-/// Alege sesiunea care rulează; altfel sesiunea curentă a Windows; altfel prima.
-pub fn choose_session_index(playing: &[bool], current: Option<usize>) -> Option<usize> {
-    playing.iter().position(|p| *p).or(current).or(if playing.is_empty() { None } else { Some(0) })
+/// Alege sesiunea de afișat, „lipicios”: o sursă care tocmai a pornit are prioritate,
+/// apoi rămânem pe sursa deja afișată (și când e pe pauză, ca ⏯ s-o poată relua),
+/// apoi orice sursă care rulează, apoi sesiunea curentă a Windows, apoi prima.
+pub fn choose_session_index(
+    ids: &[String],
+    playing: &[bool],
+    prev_playing: &HashSet<String>,
+    displayed: Option<&str>,
+    current: Option<usize>,
+) -> Option<usize> {
+    let started = (0..ids.len()).find(|&i| playing[i] && !prev_playing.contains(&ids[i]) && Some(ids[i].as_str()) != displayed);
+    let shown = displayed.and_then(|d| ids.iter().position(|id| id == d));
+    started
+        .or(shown)
+        .or_else(|| playing.iter().position(|p| *p))
+        .or(current)
+        .or(if ids.is_empty() { None } else { Some(0) })
+}
+
+/// `Try*Async` întoarce `false` când aplicația refuză comanda; tratăm asta ca eroare.
+pub fn control_outcome(r: windows::core::Result<bool>) -> Result<(), String> {
+    match r {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("aplicația a refuzat comanda".into()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+const WINRT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Așteaptă până când `poll` întoarce un rezultat, cel mult `timeout`
+/// (o aplicație-sursă blocată nu mai poate îngheța thread-ul media).
+pub fn wait_until<T>(mut poll: impl FnMut() -> Option<windows::core::Result<T>>, timeout: Duration) -> windows::core::Result<T> {
+    let start = Instant::now();
+    loop {
+        if let Some(r) = poll() {
+            return r;
+        }
+        if start.elapsed() >= timeout {
+            return Err(E_FAIL.into());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn await_op<T: RuntimeType + 'static>(op: IAsyncOperation<T>) -> windows::core::Result<T> {
+    let r = wait_until(
+        || match op.Status() {
+            Ok(AsyncStatus::Started) => None,
+            Ok(_) => Some(op.GetResults()),
+            Err(e) => Some(Err(e)),
+        },
+        WINRT_TIMEOUT,
+    );
+    if r.is_err() {
+        let _ = op.Cancel();
+    }
+    r
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -138,17 +200,29 @@ impl ThumbCache {
 }
 
 /// Ultima stare emisă; interfața o cere la pornire, pentru că evenimentele trimise
-/// înainte ca pagina să asculte se pierd.
+/// înainte ca pagina să asculte se pierd. După o comandă, starea se retrimite,
+/// ca afișarea optimistă din JS să fie corectată dacă aplicația a ignorat comanda.
 #[derive(Default, Clone)]
-pub struct LastMedia(Arc<Mutex<Option<MediaInfo>>>);
+pub struct LastMedia {
+    info: Arc<Mutex<Option<MediaInfo>>>,
+    resync: Arc<AtomicBool>,
+}
 
 impl LastMedia {
     pub fn get(&self) -> Option<MediaInfo> {
-        self.0.lock().unwrap().clone()
+        self.info.lock().unwrap().clone()
     }
 
     pub fn set(&self, info: Option<MediaInfo>) {
-        *self.0.lock().unwrap() = info;
+        *self.info.lock().unwrap() = info;
+    }
+
+    pub fn request_resync(&self) {
+        self.resync.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take_resync(&self) -> bool {
+        self.resync.swap(false, Ordering::SeqCst)
     }
 }
 
@@ -157,26 +231,46 @@ pub fn media_current(state: tauri::State<LastMedia>) -> Option<MediaInfo> {
     state.get()
 }
 
-fn pick_session(m: &Manager) -> Option<Session> {
+fn session_id(s: &Session) -> String {
+    s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
+}
+
+/// Sesiunea de afișat + mulțimea surselor care rulează acum (pentru următoarea alegere).
+fn pick_session(m: &Manager, prev_playing: &HashSet<String>, displayed: Option<&str>) -> (Option<Session>, HashSet<String>) {
     let list: Vec<Session> = m.GetSessions().map(|v| v.into_iter().collect()).unwrap_or_default();
+    let ids: Vec<String> = list.iter().map(session_id).collect();
     let playing: Vec<bool> = list
         .iter()
         .map(|s| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).map(|st| st == Status::Playing).unwrap_or(false))
         .collect();
-    let current_id = m.GetCurrentSession().and_then(|s| s.SourceAppUserModelId()).ok();
-    let current = current_id.and_then(|id| list.iter().position(|s| s.SourceAppUserModelId().ok().as_ref() == Some(&id)));
-    choose_session_index(&playing, current).and_then(|i| list.get(i).cloned())
+    let current_id = m.GetCurrentSession().map(|s| session_id(&s)).ok();
+    let current = current_id.and_then(|id| ids.iter().position(|x| *x == id));
+    let now_playing = ids.iter().zip(&playing).filter(|(_, p)| **p).map(|(id, _)| id.clone()).collect();
+    let chosen = choose_session_index(&ids, &playing, prev_playing, displayed, current).and_then(|i| list.get(i).cloned());
+    (chosen, now_playing)
 }
 
 fn read_thumbnail(props: &Props) -> Option<String> {
     let read = || -> windows::core::Result<String> {
-        let stream = props.Thumbnail()?.OpenReadAsync()?.get()?;
+        let stream = await_op(props.Thumbnail()?.OpenReadAsync()?)?;
         let size = stream.Size()? as u32;
         if size == 0 || size > 8 * 1024 * 1024 {
             return Err(E_FAIL.into());
         }
         let reader = DataReader::CreateDataReader(&stream)?;
-        reader.LoadAsync(size)?.get()?;
+        let load = reader.LoadAsync(size)?;
+        let loaded = wait_until(
+            || match load.Status() {
+                Ok(AsyncStatus::Started) => None,
+                Ok(_) => Some(load.GetResults()),
+                Err(e) => Some(Err(e)),
+            },
+            WINRT_TIMEOUT,
+        );
+        if loaded.is_err() {
+            let _ = load.Cancel();
+        }
+        loaded?;
         let mut buf = vec![0u8; size as usize];
         reader.ReadBytes(&mut buf)?;
         let ct = stream.ContentType().map(|s| s.to_string()).unwrap_or_default();
@@ -187,7 +281,7 @@ fn read_thumbnail(props: &Props) -> Option<String> {
 }
 
 fn read_session(session: &Session, cache: &mut ThumbCache) -> windows::core::Result<MediaInfo> {
-    let props = session.TryGetMediaPropertiesAsync()?.get()?;
+    let props = await_op(session.TryGetMediaPropertiesAsync()?)?;
     let title = props.Title()?.to_string();
     let artist = props.Artist().map(|s| s.to_string()).unwrap_or_default();
     let album = props.AlbumTitle().map(|s| s.to_string()).unwrap_or_default();
@@ -201,10 +295,15 @@ fn read_session(session: &Session, cache: &mut ThumbCache) -> windows::core::Res
         }
         Err(_) => (0.0, 0.0),
     };
-    let source = friendly_source(&session.SourceAppUserModelId()?.to_string());
+    let aumid = session_id(session);
+    let source = friendly_source(&aumid);
     let key = format!("{source}|{title}|{artist}");
     let thumbnail = cache.get(&key, || read_thumbnail(&props));
-    Ok(MediaInfo { title, artist, album, thumbnail, playing, position, duration, source })
+    Ok(MediaInfo { title, artist, album, thumbnail, playing, position, duration, source, aumid })
+}
+
+fn request_manager() -> windows::core::Result<Manager> {
+    await_op(Manager::RequestAsync()?)
 }
 
 /// Citește media la fiecare 500 ms și emite `media-update` doar când e nevoie.
@@ -214,8 +313,9 @@ pub fn spawn(app: AppHandle) {
         let mut last: Option<MediaInfo> = None;
         let mut last_emit = Instant::now();
         let mut cache = ThumbCache::default();
+        let mut prev_playing: HashSet<String> = HashSet::new();
         loop {
-            let manager = match Manager::RequestAsync().and_then(|op| op.get()) {
+            let manager = match request_manager() {
                 Ok(m) => m,
                 Err(e) => {
                     eprintln!("GSMTC indisponibil: {e}");
@@ -225,9 +325,12 @@ pub fn spawn(app: AppHandle) {
             };
             // managerul e re-creat la ~5 minute, ca să nu rămână blocat după restartul serviciului media
             for _ in 0..600 {
-                let cur = pick_session(&manager).and_then(|s| read_session(&s, &mut cache).ok());
+                let displayed = last.as_ref().map(|m| m.aumid.clone());
+                let (session, now_playing) = pick_session(&manager, &prev_playing, displayed.as_deref());
+                prev_playing = now_playing;
+                let cur = session.and_then(|s| read_session(&s, &mut cache).ok());
                 let since = last_emit.elapsed().as_secs_f64();
-                if should_emit(&last, &cur, since) {
+                if store.take_resync() || should_emit(&last, &cur, since) {
                     store.set(cur.clone());
                     let _ = app.emit("media-update", cur.clone());
                     last_emit = Instant::now();
@@ -239,21 +342,26 @@ pub fn spawn(app: AppHandle) {
     });
 }
 
+/// Comanda merge la sursa afișată în insulă, nu la una re-aleasă independent.
 #[tauri::command]
-pub async fn media_control(action: String) -> Result<(), String> {
+pub async fn media_control(action: String, state: tauri::State<'_, LastMedia>) -> Result<(), String> {
     let action = MediaAction::parse(&action).ok_or_else(|| format!("acțiune necunoscută: {action}"))?;
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let m = Manager::RequestAsync().and_then(|op| op.get()).map_err(|e| e.to_string())?;
-        let s = pick_session(&m).ok_or("nicio sesiune media")?;
+    let store = state.inner().clone();
+    let displayed = store.get().map(|m| m.aumid);
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let m = request_manager().map_err(|e| e.to_string())?;
+        let s = pick_session(&m, &HashSet::new(), displayed.as_deref()).0.ok_or("nicio sesiune media")?;
         let op = match action {
             MediaAction::PlayPause => s.TryTogglePlayPauseAsync(),
             MediaAction::Next => s.TrySkipNextAsync(),
             MediaAction::Prev => s.TrySkipPreviousAsync(),
         };
-        op.and_then(|o| o.get()).map(|_| ()).map_err(|e| e.to_string())
+        control_outcome(op.and_then(await_op))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    store.request_resync();
+    result
 }
 
 #[cfg(test)]
@@ -295,12 +403,67 @@ mod tests {
         assert!(should_emit(&a, &Some(info("Y", true, 0.0)), 0.5)); // piesă nouă
     }
 
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn set(v: &[&str]) -> HashSet<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
-    fn prefera_sesiunea_care_ruleaza() {
-        assert_eq!(choose_session_index(&[false, true, false], Some(0)), Some(1));
-        assert_eq!(choose_session_index(&[false, false], Some(1)), Some(1));
-        assert_eq!(choose_session_index(&[false, false], None), Some(0));
-        assert_eq!(choose_session_index(&[], None), None);
+    fn prefera_sesiunea_care_ruleaza_cand_nu_e_nimic_afisat() {
+        let s = ids(&["spotify", "chrome"]);
+        assert_eq!(choose_session_index(&s, &[false, true], &set(&[]), None, Some(0)), Some(1));
+        assert_eq!(choose_session_index(&s, &[false, false], &set(&[]), None, Some(1)), Some(1));
+        assert_eq!(choose_session_index(&s, &[false, false], &set(&[]), None, None), Some(0));
+        assert_eq!(choose_session_index(&[], &[], &set(&[]), None, None), None);
+    }
+
+    #[test]
+    fn ramane_pe_sursa_afisata_dupa_pauza() {
+        let s = ids(&["spotify", "chrome"]);
+        // scenariul A: YouTube pus pe pauză, Windows consideră Spotify „current”
+        assert_eq!(choose_session_index(&s, &[false, false], &set(&["chrome"]), Some("chrome"), Some(0)), Some(1));
+        // scenariul B: ambele rulau, pui pe pauză sursa afișată
+        assert_eq!(choose_session_index(&s, &[true, false], &set(&["spotify", "chrome"]), Some("chrome"), Some(0)), Some(1));
+    }
+
+    #[test]
+    fn trece_pe_sursa_care_tocmai_a_pornit() {
+        let s = ids(&["spotify", "chrome"]);
+        assert_eq!(choose_session_index(&s, &[true, false], &set(&[]), Some("chrome"), Some(1)), Some(0));
+    }
+
+    #[test]
+    fn sursa_afisata_inchisa_trece_pe_cea_care_ruleaza() {
+        let s = ids(&["spotify"]);
+        assert_eq!(choose_session_index(&s, &[true], &set(&["spotify"]), Some("chrome"), None), Some(0));
+    }
+
+    #[test]
+    fn comanda_refuzata_de_aplicatie_e_eroare() {
+        assert_eq!(control_outcome(Ok(true)), Ok(()));
+        assert!(control_outcome(Ok(false)).is_err());
+        assert!(control_outcome(Err(E_FAIL.into())).is_err());
+    }
+
+    #[test]
+    fn dupa_o_comanda_starea_se_retrimite() {
+        let last = LastMedia::default();
+        assert!(!last.take_resync());
+        last.request_resync();
+        assert!(last.take_resync());
+        assert!(!last.take_resync());
+    }
+
+    #[test]
+    fn asteptarea_winrt_are_timeout() {
+        let r: windows::core::Result<u32> = wait_until(|| None, Duration::from_millis(50));
+        assert!(r.is_err());
+        let mut n = 0;
+        let r = wait_until(|| { n += 1; if n > 2 { Some(Ok(7u32)) } else { None } }, Duration::from_secs(1));
+        assert_eq!(r.unwrap(), 7);
     }
 
     #[test]

@@ -35,7 +35,7 @@ Insula extinsă primește un rând de file sus, cu pictograme mici de 22 px, gri
   - sub ele, un cronometru cu Start / Pauză / Tur / Resetare și lista ultimelor 5 tururi.
 - Logica stă în JS (`src/lib/timer.js`, funcții pure pe timestamp-uri, testate). Starea e salvată în `localStorage`, ca un timer să supraviețuiască unei reîncărcări a paginii, dar nu și repornirii aplicației.
 - **Pastila**, cât rulează timerul: în stânga o pictogramă de clepsidră portocalie, în dreapta timpul rămas (`4:59`, cifre tabulare, portocaliu `#ff9f0a`). Cronometrul apare la fel, cu verde.
-- **La final:** activitate tranzitorie de alertă „Timer terminat” + sunetul de sistem (`MessageBeep`). Pastila pulsează portocaliu până la un click sau timp de 30 s.
+- **La final:** activitate tranzitorie de alertă „Timer terminat” + sunetul de alarmă Windows (`C:\Windows\Media\Alarm01.wav`, redat de 3 ori cu `PlaySoundW`, asincron). Pastila pulsează portocaliu până la un click sau timp de 30 s.
 - Cu mai multe ferestre-insulă, timerul trăiește în Rust (`timer.rs`, un singur ceas, emite `timer-state`), ca să fie același peste tot. JS doar afișează. Funcțiile pure din `timer.js` sunt folosite pentru afișare.
 
 ## 4. Indicator microfon și cameră (confidențialitate)

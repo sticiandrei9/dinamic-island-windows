@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod displays;
 mod hittest;
 mod media;
 mod platform;
@@ -10,7 +11,7 @@ mod windows_list;
 
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 fn main() {
     tauri::Builder::default()
@@ -25,10 +26,11 @@ fn main() {
                 .target(Target::new(TargetKind::Stdout))
                 .max_file_size(1_000_000)
                 .rotation_strategy(RotationStrategy::KeepOne)
+                .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(if cfg!(debug_assertions) { log::LevelFilter::Debug } else { log::LevelFilter::Info })
                 .build(),
         )
-        .manage(hittest::IslandRect::default())
+        .manage(hittest::IslandRects::default())
         .manage(media::LastMedia::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
@@ -39,6 +41,7 @@ fn main() {
             settings::get_settings,
             settings::set_settings,
             settings::open_log_dir,
+            displays::list_monitors,
         ])
         .setup(|app| {
             log::info!("Dynamic Island {} pornit", app.package_info().version);
@@ -52,10 +55,8 @@ fn main() {
             tray::sync_autostart(app.handle(), loaded.autostart);
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
 
-            let win = app.get_webview_window("island").expect("fereastra island lipsește");
-            platform::place_top_center(&win)?;
-            platform::make_no_activate(&win);
-            platform::show_keep_focus(&win)?;
+            displays::sync_windows(app.handle());
+            displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             tray::setup(app)?;

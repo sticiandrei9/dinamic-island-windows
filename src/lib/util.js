@@ -38,3 +38,8 @@ export function dominantColor(rgba) {
   const c = (v) => Math.round(Math.min(255, v));
   return `rgb(${c(R)}, ${c(G)}, ${c(B)})`;
 }
+
+// Scara insulei pentru setarea „Mărime” (aceleași valori ca în Rust, Size::scale).
+export function sizeScale(size) {
+  return { small: 0.85, normal: 1, large: 1.15 }[size] ?? 1;
+}

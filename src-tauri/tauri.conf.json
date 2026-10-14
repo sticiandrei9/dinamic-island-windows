@@ -8,25 +8,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "island",
-        "title": "Dynamic Island",
-        "url": "index.html",
-        "width": 520,
-        "height": 260,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "resizable": false,
-        "maximizable": false,
-        "minimizable": false,
-        "shadow": false,
-        "focus": false,
-        "visible": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

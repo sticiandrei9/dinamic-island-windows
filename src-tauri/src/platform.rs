@@ -1,4 +1,5 @@
-use tauri::{PhysicalPosition, WebviewWindow};
+use tauri::WebviewWindow;
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::UI::Shell::{
     SHQueryUserNotificationState, QUNS_ACCEPTS_NOTIFICATIONS, QUNS_BUSY, QUNS_PRESENTATION_MODE,
@@ -6,27 +7,13 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE,
-    MONITORINFOF_PRIMARY, WS_EX_NOACTIVATE,
+    GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
+    SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE,
 };
 
 /// HWND-ul ferestrei Tauri, convertit în tipul din crate-ul nostru `windows`.
 pub fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
     win.hwnd().ok().map(|h| HWND(h.0 as *mut core::ffi::c_void))
-}
-
-/// Așază fereastra lipită de marginea de sus, centrată pe monitorul principal.
-pub fn place_top_center(win: &WebviewWindow) -> tauri::Result<()> {
-    let monitor = match win.primary_monitor()? {
-        Some(m) => Some(m),
-        None => win.current_monitor()?,
-    };
-    if let Some(m) = monitor {
-        let size = win.outer_size()?;
-        let x = m.position().x + (m.size().width as i32 - size.width as i32) / 2;
-        win.set_position(PhysicalPosition::new(x, m.position().y))?;
-    }
-    Ok(())
 }
 
 /// Click-urile pe insulă nu fură focusul aplicației active.
@@ -65,35 +52,40 @@ pub fn covers_monitor(win: (i32, i32, i32, i32), mon: (i32, i32, i32, i32)) -> b
     win.0 <= mon.0 && win.1 <= mon.1 && win.2 >= mon.2 && win.3 >= mon.3
 }
 
-/// Aplicația din prim-plan rulează pe tot ecranul principal (video, joc)?
-pub fn foreground_is_fullscreen(own: Option<HWND>) -> bool {
+/// Dreptunghiul (left, top, right, bottom) al monitorului pe care aplicația din prim-plan
+/// rulează pe tot ecranul (video, joc), dacă există. Ferestrele procesului nostru sunt ignorate.
+pub fn fullscreen_monitor() -> Option<(i32, i32, i32, i32)> {
     unsafe {
         let fg = GetForegroundWindow();
-        if fg.0.is_null() || Some(fg) == own {
-            return false;
+        if fg.0.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        if pid == GetCurrentProcessId() {
+            return None;
         }
         let mut cls = [0u16; 64];
         let n = GetClassNameW(fg, &mut cls).max(0) as usize;
         let class = String::from_utf16_lossy(&cls[..n]);
         if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd") {
-            return false;
+            return None;
         }
         let mut wr = RECT::default();
-        if GetWindowRect(fg, &mut wr).is_err() {
-            return false;
-        }
+        GetWindowRect(fg, &mut wr).ok()?;
         let mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
         if mon.is_invalid() {
-            return false;
+            return None;
         }
         let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-        if !GetMonitorInfoW(mon, &mut mi).as_bool() || mi.dwFlags & MONITORINFOF_PRIMARY == 0 {
-            return false;
+        if !GetMonitorInfoW(mon, &mut mi).as_bool() {
+            return None;
         }
         let m = mi.rcMonitor;
-        let covers = covers_monitor((wr.left, wr.top, wr.right, wr.bottom), (m.left, m.top, m.right, m.bottom));
+        let m = (m.left, m.top, m.right, m.bottom);
+        let covers = covers_monitor((wr.left, wr.top, wr.right, wr.bottom), m);
         let state = SHQueryUserNotificationState().map(|s| s.0).unwrap_or(QUNS_ACCEPTS_NOTIFICATIONS.0);
-        is_fullscreen(covers, state)
+        is_fullscreen(covers, state).then_some(m)
     }
 }
 

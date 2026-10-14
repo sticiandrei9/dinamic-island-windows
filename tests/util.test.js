@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTime, currentPosition, dominantColor } from '../src/lib/util.js';
+import { formatTime, currentPosition, dominantColor, sizeScale } from '../src/lib/util.js';
 
 test('formatTime', () => {
   assert.equal(formatTime(0), '0:00');
@@ -31,4 +31,11 @@ test('dominantColor alege culoarea saturată', () => {
 test('dominantColor: transparent → alb, întunecat → luminat', () => {
   assert.equal(dominantColor([0, 0, 0, 0]), 'rgb(255, 255, 255)');
   assert.equal(dominantColor([100, 0, 0, 255]), 'rgb(140, 0, 0)');
+});
+
+test('sizeScale: mică / normală / mare, necunoscut → normală', () => {
+  assert.equal(sizeScale('small'), 0.85);
+  assert.equal(sizeScale('normal'), 1);
+  assert.equal(sizeScale('large'), 1.15);
+  assert.equal(sizeScale('urias'), 1);
 });

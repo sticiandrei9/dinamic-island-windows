@@ -1,12 +1,15 @@
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 use crate::platform;
+use crate::settings::SettingsState;
 
-/// Dreptunghiul insulei, în CSS px relativ la fereastră (raportat de JS la fiecare cadru de animație).
+/// Dreptunghiul insulei, în CSS px logici (fără scara mărimii), relativ la fereastră.
+/// JS îl raportează la fiecare cadru de animație.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
 pub struct Rect {
     pub x: f64,
@@ -15,67 +18,88 @@ pub struct Rect {
     pub h: f64,
 }
 
+/// Dreptunghiul fiecărei insule, după label-ul ferestrei.
 #[derive(Default)]
-pub struct IslandRect(pub Arc<Mutex<Rect>>);
+pub struct IslandRects(pub Mutex<HashMap<String, Rect>>);
 
 pub fn point_in_rect(px: f64, py: f64, r: &Rect, margin: f64) -> bool {
     px >= r.x - margin && px <= r.x + r.w + margin && py >= r.y - margin && py <= r.y + r.h + margin
 }
 
-#[tauri::command]
-pub fn set_island_rect(state: tauri::State<IslandRect>, rect: Rect) {
-    *state.0.lock().unwrap() = rect;
+/// Colțul ferestrei e pe monitorul (left, top, right, bottom)?
+pub fn on_monitor(pos: (i32, i32), mon: (i32, i32, i32, i32)) -> bool {
+    pos.0 >= mon.0 && pos.0 < mon.2 && pos.1 >= mon.1 && pos.1 < mon.3
 }
 
-/// Thread care: (1) face fereastra transparentă la click în afara insulei,
-/// (2) trimite `island-hover` către JS, (3) ascunde insula (`island-visible`) când o aplicație e pe tot ecranul.
-/// Fereastra nu e ascunsă cu adevărat: re-afișarea ar fura focusul aplicației care iese din fullscreen.
+#[tauri::command]
+pub fn set_island_rect(window: WebviewWindow, state: tauri::State<IslandRects>, rect: Rect) {
+    state.0.lock().unwrap().insert(window.label().to_string(), rect);
+}
+
+#[derive(Default)]
+struct WinState {
+    inside: Option<bool>,
+    hidden: bool,
+    geo: (i32, i32, f64),
+    geo_at: Option<Instant>,
+}
+
+/// Un singur thread pentru toate insulele: (1) fereastra e transparentă la click în afara insulei,
+/// (2) `island-hover` către fereastra respectivă, (3) `island-visible` = false cât timp o aplicație
+/// rulează pe tot ecranul pe monitorul acelei insule. Fereastra nu e ascunsă cu adevărat:
+/// re-afișarea ar fura focusul aplicației care iese din fullscreen.
 pub fn spawn(app: AppHandle) {
-    let shared = app.state::<IslandRect>().0.clone();
     std::thread::spawn(move || {
-        let Some(win) = app.get_webview_window("island") else { return };
-        let own = platform::hwnd_of(&win);
-        let mut inside_last: Option<bool> = None;
-        let mut hidden = false;
-        let mut geo = (0i32, 0i32, 1.0f64);
-        let mut geo_at: Option<Instant> = None;
-        let mut fs_at = Instant::now();
+        let mut states: HashMap<String, WinState> = HashMap::new();
+        let mut fs_at = Instant::now() - Duration::from_secs(1);
+        let mut fs_mon: Option<(i32, i32, i32, i32)> = None;
 
         loop {
             std::thread::sleep(Duration::from_millis(30));
-
-            if geo_at.map_or(true, |t| t.elapsed() > Duration::from_secs(1)) {
-                if let (Ok(p), Ok(s)) = (win.outer_position(), win.scale_factor()) {
-                    geo = (p.x, p.y, s);
-                }
-                geo_at = Some(Instant::now());
-            }
-
+            let size_scale = app.state::<SettingsState>().get().size.scale();
             if fs_at.elapsed() > Duration::from_millis(500) {
                 fs_at = Instant::now();
-                let fs = platform::foreground_is_fullscreen(own);
-                if fs != hidden {
-                    hidden = fs;
-                    let _ = app.emit("island-visible", !fs);
-                    if fs {
+                fs_mon = platform::fullscreen_monitor();
+            }
+            let cursor = platform::cursor_pos();
+            let rects = app.state::<IslandRects>().0.lock().unwrap().clone();
+            let windows: Vec<(String, WebviewWindow)> =
+                app.webview_windows().into_iter().filter(|(l, _)| l.starts_with("island-")).collect();
+            states.retain(|l, _| windows.iter().any(|(w, _)| w == l));
+
+            for (label, win) in windows {
+                let st = states.entry(label.clone()).or_default();
+                if st.geo_at.map_or(true, |t| t.elapsed() > Duration::from_secs(1)) {
+                    if let (Ok(p), Ok(s)) = (win.outer_position(), win.scale_factor()) {
+                        st.geo = (p.x, p.y, s);
+                    }
+                    st.geo_at = Some(Instant::now());
+                }
+
+                let hidden = fs_mon.is_some_and(|m| on_monitor((st.geo.0, st.geo.1), m));
+                if hidden != st.hidden {
+                    st.hidden = hidden;
+                    let _ = app.emit_to(label.as_str(), "island-visible", !hidden);
+                    if hidden {
                         let _ = win.set_ignore_cursor_events(true);
-                        inside_last = Some(false);
+                        st.inside = Some(false);
                     }
                 }
-            }
-            if hidden {
-                continue;
-            }
+                if hidden {
+                    continue;
+                }
 
-            let Some((cx, cy)) = platform::cursor_pos() else { continue };
-            let rect = *shared.lock().unwrap();
-            let px = (cx - geo.0) as f64 / geo.2;
-            let py = (cy - geo.1) as f64 / geo.2;
-            let inside = point_in_rect(px, py, &rect, 1.0);
-            if inside_last != Some(inside) {
-                inside_last = Some(inside);
-                let _ = win.set_ignore_cursor_events(!inside);
-                let _ = app.emit("island-hover", inside);
+                let (Some((cx, cy)), Some(r)) = (cursor, rects.get(&label)) else { continue };
+                let k = size_scale;
+                let scaled = Rect { x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k };
+                let px = (cx - st.geo.0) as f64 / st.geo.2;
+                let py = (cy - st.geo.1) as f64 / st.geo.2;
+                let inside = point_in_rect(px, py, &scaled, 1.0);
+                if st.inside != Some(inside) {
+                    st.inside = Some(inside);
+                    let _ = win.set_ignore_cursor_events(!inside);
+                    let _ = app.emit_to(label.as_str(), "island-hover", inside);
+                }
             }
         }
     });
@@ -93,5 +117,13 @@ mod tests {
         assert!(!point_in_rect(111.0, 10.0, &r, 0.0));
         assert!(point_in_rect(111.0, 10.0, &r, 1.0));
         assert!(!point_in_rect(50.0, 40.0, &r, 1.0));
+    }
+
+    #[test]
+    fn fereastra_pe_monitor() {
+        let mon = (1920, 0, 3840, 1080);
+        assert!(on_monitor((2600, 0), mon));
+        assert!(!on_monitor((700, 0), mon));
+        assert!(!on_monitor((3840, 0), mon));
     }
 }

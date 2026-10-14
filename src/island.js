@@ -2,6 +2,7 @@ import { Spring } from './lib/spring.js';
 import { islandPath, islandRect } from './lib/shape.js';
 import { MediaView } from './media-view.js';
 import { AppsView } from './apps-view.js';
+import { sizeScale } from './lib/util.js';
 
 const W = 520;
 const EAR = 7;
@@ -28,6 +29,9 @@ let raf = 0;
 let lastFrame = 0;
 let rect = { x: 0, y: 0, w: 0, h: 0 };
 let lastRectKey = '';
+let zoom = 1;
+let expandOnHover = true;
+let mediaEnabled = true;
 
 const media = new MediaView({ invoke, onChange: retarget });
 const apps = new AppsView({ invoke, onPicked: () => setExpanded(false) });
@@ -85,6 +89,7 @@ function setExpanded(on) {
 let hoverTimer = 0;
 function onHover(inside) {
   clearTimeout(hoverTimer);
+  if (inside && !expandOnHover) return; // în modul „doar la click”, hover-ul doar strânge
   hoverTimer = setTimeout(() => setExpanded(inside), inside ? 120 : 220);
 }
 
@@ -103,12 +108,27 @@ function updateClock() {
 }
 setInterval(() => expanded && updateClock(), 1000);
 
+// setări: mărime, mod de extindere, module
+function applySettings(st) {
+  if (!st) return;
+  zoom = sizeScale(st.size);
+  document.getElementById('stage').style.zoom = zoom;
+  expandOnHover = st.expand_on !== 'click';
+  document.body.classList.toggle('no-apps', !st.modules.apps);
+  mediaEnabled = st.modules.media;
+  if (!mediaEnabled && media.hasMedia()) media.update(null);
+}
+
 if (tauri) {
-  tauri.event.listen('island-hover', (e) => onHover(!!e.payload));
+  const self = tauri.webviewWindow.getCurrentWebviewWindow();
+  invoke('get_settings').then(applySettings).catch(() => {});
+  tauri.event.listen('settings-changed', (e) => applySettings(e.payload));
+  // evenimente trimise doar acestei insule (fiecare monitor are fereastra lui)
+  self.listen('island-hover', (e) => onHover(!!e.payload));
   // după ce ascultăm, cerem și starea curentă (evenimentele de dinainte de încărcare s-au pierdut)
-  tauri.event.listen('media-update', (e) => media.update(e.payload ?? null))
+  tauri.event.listen('media-update', (e) => mediaEnabled && media.update(e.payload ?? null))
     .then(() => invoke('media_current'))
-    .then((info) => { if (info && !media.hasMedia()) media.update(info); })
+    .then((info) => { if (info && mediaEnabled && !media.hasMedia()) media.update(info); })
     .catch(() => {});
   tauri.event.listen('update-installing', (e) => {
     document.getElementById('update').textContent = `Actualizare la v${e.payload}`;
@@ -117,7 +137,7 @@ if (tauri) {
   });
   tauri.event.listen('update-failed', () => document.body.classList.remove('updating'));
   // ascunsă cât timp o aplicație rulează pe tot ecranul
-  tauri.event.listen('island-visible', (e) => {
+  self.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);
     if (!e.payload) setExpanded(false);
   });
@@ -125,7 +145,8 @@ if (tauri) {
   // în browser: hover calculat local, cu același dreptunghi ca în Rust
   let inside = false;
   document.addEventListener('pointermove', (e) => {
-    const now = e.clientX >= rect.x && e.clientX <= rect.x + rect.w && e.clientY >= rect.y && e.clientY <= rect.y + rect.h;
+    const x = e.clientX / zoom, y = e.clientY / zoom;
+    const now = x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
     if (now !== inside) { inside = now; onHover(now); }
   });
   document.addEventListener('pointerleave', () => { inside = false; onHover(false); });

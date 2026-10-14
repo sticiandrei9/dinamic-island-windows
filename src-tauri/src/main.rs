@@ -38,11 +38,21 @@ fn main() {
                 .level(if cfg!(debug_assertions) { log::LevelFilter::Debug } else { log::LevelFilter::Info })
                 .build(),
         )
+        // Oglinda (fila insulei) folosește camera: acordăm accesul fără prompt-ul WebView2,
+        // doar ferestrelor-insulă și doar pentru cameră
+        .on_permission_request(|webview, kind| {
+            if webview.label().starts_with("island-") && matches!(kind, tauri::webview::PermissionKind::Camera) {
+                tauri::webview::PermissionResponse::Allow
+            } else {
+                tauri::webview::PermissionResponse::Default
+            }
+        })
         .manage(hittest::IslandRects::default())
         .manage(media::LastMedia::default())
         .manage(updater::Updater::default())
         .manage(timer::ClockState::default())
         .manage(lyrics::LyricsCache::default())
+        .manage(privacy::MirrorActive::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
             media::media_control,
@@ -57,6 +67,7 @@ fn main() {
             shelf::shelf_open,
             shelf::shelf_reveal,
             shelf::shelf_drag_out,
+            privacy::set_mirror_active,
             windows_list::list_windows,
             windows_list::focus_window,
             settings::get_settings,

@@ -62,7 +62,7 @@ export function init(island) {
   function card(it) {
     const c = el('div', `sh-card${it.exists ? '' : ' missing'}`);
     c.title = it.exists ? it.path : 'Fișier mutat sau șters';
-    if (it.icon) c.append(Object.assign(document.createElement('img'), { src: it.icon, alt: '' }));
+    if (it.icon) c.append(Object.assign(document.createElement('img'), { src: it.icon, alt: '', draggable: false }));
     else { const ph = el('div', 'sh-ph'); ph.innerHTML = ICONS.shelf; c.append(ph); }
     c.append(el('div', 'sh-name', it.name));
     const x = el('button', 'sh-x', '×');
@@ -78,6 +78,7 @@ export function init(island) {
       invoke('shelf_drag_out', { path: it.path }).catch(() => {});
     });
     c.addEventListener('pointerup', () => { start = null; });
+    c.addEventListener('dragstart', (e) => e.preventDefault());
     c.addEventListener('click', (e) => {
       e.stopPropagation();
       closeMenu();

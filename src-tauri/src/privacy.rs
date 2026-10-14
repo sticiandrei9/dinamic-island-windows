@@ -48,6 +48,23 @@ pub fn in_use(entries: &[Entry], self_exe: &str) -> Vec<String> {
     out
 }
 
+/// Oglinda insulei folosește camera prin procesul WebView2; cât e deschisă, nu o raportăm.
+pub fn hide_own_mirror(apps: Vec<String>, mirror_active: bool) -> Vec<String> {
+    if !mirror_active {
+        return apps;
+    }
+    apps.into_iter().filter(|a| !a.eq_ignore_ascii_case("msedgewebview2")).collect()
+}
+
+/// Oglinda e deschisă acum (anunțat de interfață).
+#[derive(Default)]
+pub struct MirrorActive(pub std::sync::atomic::AtomicBool);
+
+#[tauri::command]
+pub fn set_mirror_active(state: tauri::State<MirrorActive>, active: bool) {
+    state.0.store(active, std::sync::atomic::Ordering::SeqCst);
+}
+
 fn read_entries(capability: &str) -> Vec<Entry> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let Ok(root) = hkcu.open_subkey(format!(r"{STORE}\{capability}")) else { return Vec::new() };
@@ -81,7 +98,11 @@ pub fn spawn(app: AppHandle) {
         loop {
             std::thread::sleep(Duration::from_secs(1));
             let cur = if app.state::<SettingsState>().get().modules.privacy {
-                Privacy { mic: in_use(&read_entries("microphone"), &me), cam: in_use(&read_entries("webcam"), &me) }
+                let mirror = app.state::<MirrorActive>().0.load(std::sync::atomic::Ordering::SeqCst);
+                Privacy {
+                    mic: in_use(&read_entries("microphone"), &me),
+                    cam: hide_own_mirror(in_use(&read_entries("webcam"), &me), mirror),
+                }
             } else {
                 Privacy::default()
             };
@@ -122,6 +143,13 @@ mod tests {
     fn insula_insasi_e_ignorata() {
         let list = vec![e("C:#Program Files#Dynamic Island#dynamic-island.exe", 5, 0)];
         assert!(in_use(&list, "C:\\Program Files\\Dynamic Island\\dynamic-island.exe").is_empty());
+    }
+
+    #[test]
+    fn oglinda_noastra_nu_aprinde_punctul_de_camera() {
+        let cams = vec!["msedgewebview2".to_string(), "Zoom".to_string()];
+        assert_eq!(hide_own_mirror(cams.clone(), true), vec!["Zoom".to_string()]);
+        assert_eq!(hide_own_mirror(cams.clone(), false), cams);
     }
 
     #[test]

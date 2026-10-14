@@ -22,6 +22,8 @@ body.expanded #shape { filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .35)); }
 
 .layer { position: absolute; top: 0; left: 50%; transform-origin: 50% 0; }
 svg { display: block; }
+/* imaginile nu se trag ca HTML (WebView2 le-ar salva ca „download.png”); fișierele se trag doar prin drag-ul nativ */
+img { -webkit-user-drag: none; user-select: none; }
 
 /* intrare/ieșire comună: blur + fade, ca pe iPhone */
 .fade { transition: opacity .25s ease, filter .25s ease; }

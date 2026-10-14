@@ -115,6 +115,7 @@ if (tauri) {
     document.body.classList.add('updating');
     setExpanded(false);
   });
+  tauri.event.listen('update-failed', () => document.body.classList.remove('updating'));
   // ascunsă cât timp o aplicație rulează pe tot ecranul
   tauri.event.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);

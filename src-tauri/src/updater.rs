@@ -29,7 +29,11 @@ async fn check_and_install(app: &AppHandle) -> tauri_plugin_updater::Result<()> 
     if let Some(update) = app.updater()?.check().await? {
         let _ = app.emit("update-installing", update.version.clone());
         std::thread::sleep(Duration::from_secs(2));
-        update.download_and_install(|_, _| {}, || {}).await?;
+        if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+            // descărcare sau semnătură greșită: insula revine la normal
+            let _ = app.emit("update-failed", ());
+            return Err(e);
+        }
         app.restart();
     }
     Ok(())

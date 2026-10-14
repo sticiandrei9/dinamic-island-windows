@@ -1,9 +1,53 @@
 <!doctype html>
 <html lang="ro">
-<head><meta charset="utf-8" /><title>Dynamic Island</title>
-<style>
-  html, body { margin: 0; background: transparent; }
-  .pill { width: 190px; height: 32px; margin: 0 auto; background: #000; border-radius: 0 0 10px 10px; }
-</style></head>
-<body><div class="pill"></div></body>
+<head>
+  <meta charset="utf-8" />
+  <title>Dynamic Island</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="stage">
+    <svg id="shape" width="520" height="260" viewBox="0 0 520 260" aria-hidden="true">
+      <path id="shape-path" d="" />
+    </svg>
+
+    <div id="compact" class="layer">
+      <img id="c-art" class="art" alt="" />
+      <div class="viz"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+
+    <div id="expanded" class="layer">
+      <section id="x-media">
+        <div class="row-top">
+          <img id="x-art" class="art" alt="" />
+          <div class="meta">
+            <div id="x-title" class="title"></div>
+            <div id="x-artist" class="artist"></div>
+          </div>
+          <div class="viz big"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="progress">
+          <span id="x-pos">0:00</span>
+          <div class="track"><div id="x-fill" class="fill"></div></div>
+          <span id="x-rem">-0:00</span>
+        </div>
+        <div class="controls">
+          <button data-action="prev" aria-label="Anterior">
+            <svg viewBox="0 0 28 20"><path d="M13 4.2v11.6L4 10z M25 4.2v11.6L16 10z" /></svg>
+          </button>
+          <button data-action="play_pause" aria-label="Play/Pauză" id="x-play"></button>
+          <button data-action="next" aria-label="Următor">
+            <svg viewBox="0 0 28 20"><path d="M3 4.2v11.6L12 10z M15 4.2v11.6L24 10z" /></svg>
+          </button>
+        </div>
+      </section>
+      <section id="x-clock">
+        <div id="x-time" class="clock-time"></div>
+        <div id="x-date" class="clock-date"></div>
+      </section>
+      <div id="x-apps" class="apps"></div>
+    </div>
+  </div>
+  <script type="module" src="island.js"></script>
+</body>
 </html>

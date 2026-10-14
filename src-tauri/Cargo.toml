@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 png = "0.17"
+drag = "2.1.1"
 
 [dependencies.windows]
 version = "0.58"

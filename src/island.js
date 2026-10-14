@@ -224,8 +224,11 @@ function renderTransient(t) {
 }
 
 // ---------------- file ----------------
+const TAB_ORDER = ['home', 'timer', 'shelf', 'mirror'];
 function availableTabs() {
-  return [...panes.entries()].filter(([, p]) => !p.module || settings?.modules?.[p.module] !== false);
+  return [...panes.entries()]
+    .filter(([, p]) => !p.module || settings?.modules?.[p.module] !== false)
+    .sort(([a], [b]) => TAB_ORDER.indexOf(a) - TAB_ORDER.indexOf(b));
 }
 
 function renderTabs() {

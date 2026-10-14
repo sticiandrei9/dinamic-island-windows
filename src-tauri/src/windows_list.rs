@@ -166,22 +166,43 @@ unsafe fn hicon_to_png(icon: HICON) -> Option<Vec<u8>> {
     result
 }
 
-unsafe fn load_icon(path: &str) -> Option<String> {
+/// Iconița mare a unui fișier, folder sau exe, ca PNG.
+pub fn file_icon_png(path: &str) -> Option<Vec<u8>> {
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     let mut info = SHFILEINFOW::default();
-    let r = SHGetFileInfoW(
-        PCWSTR(wide.as_ptr()),
-        FILE_FLAGS_AND_ATTRIBUTES(0),
-        Some(&mut info),
-        std::mem::size_of::<SHFILEINFOW>() as u32,
-        SHGFI_ICON | SHGFI_LARGEICON,
-    );
-    if r == 0 || info.hIcon.is_invalid() {
-        return None;
+    unsafe {
+        let r = SHGetFileInfoW(
+            PCWSTR(wide.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        );
+        if r == 0 || info.hIcon.is_invalid() {
+            return None;
+        }
+        let png = hicon_to_png(info.hIcon);
+        let _ = DestroyIcon(info.hIcon);
+        png
     }
-    let png = hicon_to_png(info.hIcon);
-    let _ = DestroyIcon(info.hIcon);
-    png.map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
+
+unsafe fn load_icon(path: &str) -> Option<String> {
+    file_icon_png(path).map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
+
+/// Iconița unui fișier pentru raft (data URL), cu cache: după extensie pentru fișierele obișnuite,
+/// după cale pentru exe/lnk/ico (au iconițe proprii) și pentru foldere.
+pub fn file_icon(path: &str) -> Option<String> {
+    let p = std::path::Path::new(path);
+    let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let key = if p.is_dir() || ext.is_empty() || matches!(ext.as_str(), "exe" | "lnk" | "ico" | "url") {
+        path.to_lowercase()
+    } else {
+        format!("*.{ext}")
+    };
+    let mut cache = icon_cache().lock().unwrap();
+    cache.entry(key).or_insert_with(|| unsafe { load_icon(path) }).clone()
 }
 
 /// Numele exe-ului unui proces („ShellExperienceHost.exe”), sau gol dacă nu poate fi citit.

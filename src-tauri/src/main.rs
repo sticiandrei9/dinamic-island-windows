@@ -10,6 +10,7 @@ mod notifications;
 mod platform;
 mod privacy;
 mod settings;
+mod shelf;
 mod timer;
 mod tray;
 mod updater;
@@ -49,6 +50,13 @@ fn main() {
             media::media_seek,
             media::media_open_source,
             lyrics::get_lyrics,
+            shelf::shelf_list,
+            shelf::shelf_add_paths,
+            shelf::shelf_remove_path,
+            shelf::shelf_clear,
+            shelf::shelf_open,
+            shelf::shelf_reveal,
+            shelf::shelf_drag_out,
             windows_list::list_windows,
             windows_list::focus_window,
             settings::get_settings,
@@ -73,6 +81,7 @@ fn main() {
             }
             tray::sync_autostart(app.handle(), loaded.autostart);
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
+            app.manage(shelf::ShelfState::load(app.path().app_config_dir()?.join("shelf.json")));
 
             updater::install_pending_at_startup(app.handle());
             displays::sync_windows(app.handle());

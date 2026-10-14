@@ -27,6 +27,8 @@ pub struct MediaInfo {
     pub position: f64,
     pub duration: f64,
     pub source: String,
+    /// sesiunea permite mutarea poziției (seek)
+    pub can_seek: bool,
     /// identificatorul sesiunii Windows; nu ajunge în interfață
     #[serde(skip)]
     pub aumid: String,
@@ -73,7 +75,7 @@ pub fn should_emit(prev: &Option<MediaInfo>, cur: &Option<MediaInfo>, secs_since
         (None, None) => false,
         (Some(_), None) | (None, Some(_)) => true,
         (Some(p), Some(c)) => {
-            if p.title != c.title || p.artist != c.artist || p.album != c.album || p.playing != c.playing
+            if p.title != c.title || p.artist != c.artist || p.album != c.album || p.playing != c.playing || p.can_seek != c.can_seek
                 || p.source != c.source || p.thumbnail != c.thumbnail || (p.duration - c.duration).abs() > 0.5
             {
                 return true;
@@ -289,7 +291,9 @@ fn read_session(session: &Session, cache: &mut ThumbCache) -> windows::core::Res
     let title = props.Title()?.to_string();
     let artist = props.Artist().map(|s| s.to_string()).unwrap_or_default();
     let album = props.AlbumTitle().map(|s| s.to_string()).unwrap_or_default();
-    let playing = session.GetPlaybackInfo()?.PlaybackStatus()? == Status::Playing;
+    let info = session.GetPlaybackInfo()?;
+    let playing = info.PlaybackStatus()? == Status::Playing;
+    let can_seek = info.Controls().and_then(|c| c.IsPlaybackPositionEnabled()).unwrap_or(false);
     let (position, duration) = match session.GetTimelineProperties() {
         Ok(tl) => {
             let pos = tl.Position().map(|t| t.Duration).unwrap_or(0);
@@ -303,7 +307,7 @@ fn read_session(session: &Session, cache: &mut ThumbCache) -> windows::core::Res
     let source = friendly_source(&aumid);
     let key = format!("{source}|{title}|{artist}");
     let thumbnail = cache.get(&key, || read_thumbnail(&props));
-    Ok(MediaInfo { title, artist, album, thumbnail, playing, position, duration, source, aumid })
+    Ok(MediaInfo { title, artist, album, thumbnail, playing, position, duration, source, can_seek, aumid })
 }
 
 fn request_manager() -> windows::core::Result<Manager> {
@@ -344,6 +348,67 @@ pub fn spawn(app: AppHandle) {
             }
         }
     });
+}
+
+pub fn seconds_to_ticks(seconds: f64) -> i64 {
+    if seconds.is_finite() && seconds > 0.0 { (seconds * TICKS_PER_SEC).round() as i64 } else { 0 }
+}
+
+/// Exe-ul aplicației din AUMID-ul sesiunii media (unde se poate deduce).
+pub fn aumid_to_exe(aumid: &str) -> Option<String> {
+    let known = [("chrome", "chrome.exe"), ("msedge", "msedge.exe"), ("308046b0af4a39cb", "firefox.exe"), ("opera", "opera.exe"), ("brave", "brave.exe")];
+    let l = aumid.to_lowercase();
+    if l.is_empty() {
+        return None;
+    }
+    if let Some((_, exe)) = known.iter().find(|(k, _)| l == *k || l.ends_with(&format!("!{k}"))) {
+        return Some(exe.to_string());
+    }
+    let last = l.rsplit(['\\', '!']).next().unwrap_or(&l);
+    Some(if last.ends_with(".exe") { last.to_string() } else { format!("{last}.exe") })
+}
+
+/// Fereastra de adus în față: a aplicației-sursă, de preferat cea al cărei titlu conține titlul piesei
+/// (la YouTube, titlul tab-ului e titlul video-ului); fără exe cunoscut, doar după titlu.
+pub fn pick_source_window(aumid: &str, track_title: &str, windows: &[crate::windows_list::AppWindow]) -> Option<isize> {
+    let exe = aumid_to_exe(aumid);
+    let t = track_title.trim().to_lowercase();
+    let has_title = |w: &crate::windows_list::AppWindow| !t.is_empty() && w.title.to_lowercase().contains(&t);
+    let same_exe: Vec<&crate::windows_list::AppWindow> =
+        windows.iter().filter(|w| exe.as_deref().is_some_and(|e| w.exe.eq_ignore_ascii_case(e))).collect();
+    if !same_exe.is_empty() {
+        return same_exe.iter().copied().find(|w| has_title(w)).or(same_exe.first().copied()).map(|w| w.hwnd);
+    }
+    windows.iter().find(|w| has_title(w)).map(|w| w.hwnd)
+}
+
+/// Click pe piesă în insulă: aplicația care cântă vine în față.
+#[tauri::command]
+pub async fn media_open_source(state: tauri::State<'_, LastMedia>) -> Result<(), String> {
+    let info = state.get().ok_or("nicio sesiune media")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let windows = crate::windows_list::collect_all_windows();
+        let hwnd = pick_source_window(&info.aumid, &info.title, &windows).ok_or("fereastra aplicației nu a fost găsită")?;
+        crate::windows_list::focus_window(hwnd)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Mută poziția în piesa afișată (bara de progres trasă în insulă).
+#[tauri::command]
+pub async fn media_seek(seconds: f64, state: tauri::State<'_, LastMedia>) -> Result<(), String> {
+    let store = state.inner().clone();
+    let displayed = store.get().map(|m| m.aumid);
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let m = request_manager().map_err(|e| e.to_string())?;
+        let s = pick_session(&m, &HashSet::new(), displayed.as_deref()).0.ok_or("nicio sesiune media")?;
+        control_outcome(s.TryChangePlaybackPositionAsync(seconds_to_ticks(seconds)).and_then(await_op))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    store.request_resync();
+    result
 }
 
 /// Comanda merge la sursa afișată în insulă, nu la una re-aleasă independent.
@@ -478,6 +543,43 @@ mod tests {
         assert_eq!(last.get().map(|m| m.title), Some("X".to_string()));
         last.set(None);
         assert_eq!(last.get(), None);
+    }
+
+    #[test]
+    fn secunde_in_ticks_pentru_seek() {
+        assert_eq!(seconds_to_ticks(1.5), 15_000_000);
+        assert_eq!(seconds_to_ticks(-3.0), 0);
+        assert_eq!(seconds_to_ticks(f64::NAN), 0);
+    }
+
+    #[test]
+    fn aumid_in_exe() {
+        assert_eq!(aumid_to_exe("Spotify.exe").as_deref(), Some("spotify.exe"));
+        assert_eq!(aumid_to_exe("Chrome").as_deref(), Some("chrome.exe"));
+        assert_eq!(aumid_to_exe("MSEdge").as_deref(), Some("msedge.exe"));
+        assert_eq!(aumid_to_exe("308046B0AF4A39CB").as_deref(), Some("firefox.exe"));
+        assert_eq!(aumid_to_exe("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify").as_deref(), Some("spotify.exe"));
+        assert_eq!(aumid_to_exe(r"C:\Apps\vlc.exe").as_deref(), Some("vlc.exe"));
+        assert_eq!(aumid_to_exe("").as_deref(), None);
+    }
+
+    fn w(hwnd: isize, exe: &str, title: &str) -> crate::windows_list::AppWindow {
+        crate::windows_list::AppWindow { hwnd, exe: exe.into(), title: title.into(), icon: None }
+    }
+
+    #[test]
+    fn fereastra_sursei() {
+        let list = vec![
+            w(1, "chrome.exe", "Gmail - Google Chrome"),
+            w(2, "chrome.exe", "Never Gonna Give You Up - YouTube - Google Chrome"),
+            w(3, "Spotify.exe", "Spotify Premium"),
+            w(4, "Code.exe", "Never Gonna Give You Up.md"),
+        ];
+        assert_eq!(pick_source_window("Chrome", "Never Gonna Give You Up", &list), Some(2));
+        assert_eq!(pick_source_window("Chrome", "Altceva", &list), Some(1)); // prima în ordinea Z
+        assert_eq!(pick_source_window("Spotify.exe", "Blinding Lights", &list), Some(3));
+        assert_eq!(pick_source_window("Necunoscut!App", "Never Gonna Give You Up", &list), Some(2)); // după titlu
+        assert_eq!(pick_source_window("Necunoscut!App", "Nimic", &list), None);
     }
 
     #[test]

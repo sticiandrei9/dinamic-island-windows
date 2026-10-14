@@ -157,7 +157,11 @@ body.expanded #expanded {
 }
 .progress span { width: 38px; }
 .progress span:last-child { text-align: right; }
-.progress .track { flex: 1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .18); overflow: hidden; }
+.progress .track { flex: 1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .18); overflow: hidden; transition: height .25s cubic-bezier(.2, 1.4, .4, 1); }
+body.can-seek .progress .track { cursor: pointer; }
+body.can-seek .progress .track:hover, body.can-seek .progress .track:active { height: 9px; }
+#x-art, #x-title, #c-art { cursor: pointer; }
+#x-art:active { transform: scale(.94); }
 .progress .fill { height: 100%; width: 0; border-radius: 3px; background: rgba(255, 255, 255, .92); }
 body.no-timeline .progress { visibility: hidden; }
 body.no-apps .apps { display: none; }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTime, currentPosition, dominantColor, sizeScale, waveLevel } from '../src/lib/util.js';
+import { formatTime, currentPosition, dominantColor, sizeScale, waveLevel, seekFromPointer } from '../src/lib/util.js';
 
 test('formatTime', () => {
   assert.equal(formatTime(0), '0:00');
@@ -46,4 +46,11 @@ test('waveLevel: undele difuzorului după volum', () => {
   assert.equal(waveLevel(0.5, false), 2);
   assert.equal(waveLevel(0.9, false), 3);
   assert.equal(waveLevel(0.9, true), 0);
+});
+
+test('seekFromPointer: poziția din bară, limitată la [0, durată]', () => {
+  assert.equal(seekFromPointer(150, 100, 200, 240), 60);
+  assert.equal(seekFromPointer(50, 100, 200, 240), 0);
+  assert.equal(seekFromPointer(400, 100, 200, 240), 240);
+  assert.equal(seekFromPointer(150, 100, 0, 240), 0);
 });

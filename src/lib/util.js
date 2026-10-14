@@ -49,3 +49,10 @@ export function waveLevel(level, muted) {
   if (muted || level <= 0) return 0;
   return level < 0.34 ? 1 : level < 0.67 ? 2 : 3;
 }
+
+// Secunda la care duce un click/o tragere pe bara de progres.
+export function seekFromPointer(x, trackLeft, trackWidth, duration) {
+  if (!(trackWidth > 0) || !(duration > 0)) return 0;
+  const f = Math.max(0, Math.min(1, (x - trackLeft) / trackWidth));
+  return f * duration;
+}

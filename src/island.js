@@ -94,7 +94,9 @@ export const island = {
 const media = new MediaView({
   invoke,
   onChange: () => island.setActivity('media', media.hasMedia() ? { kind: 'media' } : null),
+  onOpenSource: () => setExpanded(false),
 });
+island.media = media;
 const apps = new AppsView({ invoke, onPicked: () => setExpanded(false) });
 panes.set('home', {
   module: null,

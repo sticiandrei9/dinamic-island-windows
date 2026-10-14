@@ -44,6 +44,8 @@ fn main() {
             hittest::set_island_rect,
             media::media_control,
             media::media_current,
+            media::media_seek,
+            media::media_open_source,
             windows_list::list_windows,
             windows_list::focus_window,
             settings::get_settings,

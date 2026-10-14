@@ -194,7 +194,8 @@ fn icon_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     CACHE.get_or_init(Default::default)
 }
 
-pub fn collect_windows() -> Vec<AppWindow> {
+/// Toate ferestrele de aplicații, câte una pe fereastră (fără gruparea pe exe).
+pub fn collect_all_windows() -> Vec<AppWindow> {
     let mut out = Vec::new();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -218,7 +219,11 @@ pub fn collect_windows() -> Vec<AppWindow> {
             out.push(AppWindow { hwnd: h.0 as isize, title: c.title, exe, icon });
         }
     }
-    dedupe_by_exe(out)
+    out
+}
+
+pub fn collect_windows() -> Vec<AppWindow> {
+    dedupe_by_exe(collect_all_windows())
 }
 
 #[tauri::command]

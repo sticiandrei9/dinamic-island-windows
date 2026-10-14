@@ -4,6 +4,7 @@ mod displays;
 mod hittest;
 mod media;
 mod platform;
+mod privacy;
 mod settings;
 mod timer;
 mod tray;
@@ -69,6 +70,7 @@ fn main() {
             hittest::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
+            privacy::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
             if std::env::var_os("DI_OPEN_SETTINGS").is_some() {

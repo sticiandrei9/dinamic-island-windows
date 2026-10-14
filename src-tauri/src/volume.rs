@@ -237,4 +237,15 @@ mod tests {
     fn codul_ioctl_pentru_luminozitate() {
         assert_eq!(IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS, 0x0023_0498);
     }
+
+    /// Rulează doar manual: luminozitatea reală a ecranului intern.
+    #[test]
+    #[ignore]
+    fn citeste_luminozitatea_reala() {
+        let lcd = unsafe {
+            CreateFileW(w!(r"\\.\LCD"), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None)
+        };
+        println!("LCD: {:?}", lcd.as_ref().map(|_| "deschis"));
+        println!("luminozitate: {:?}", lcd.ok().and_then(read_brightness));
+    }
 }

@@ -7,51 +7,91 @@
 </head>
 <body>
   <div id="stage">
-    <svg id="shape" width="520" height="300" viewBox="0 0 520 300" aria-hidden="true">
+    <svg id="shape" width="520" height="340" viewBox="0 0 520 340" aria-hidden="true">
       <path id="shape-path" d="" />
+      <path id="bubble-path" d="" />
     </svg>
 
-    <div id="compact" class="layer">
-      <img id="c-art" class="art" alt="" />
-      <div class="viz"><i></i><i></i><i></i><i></i><i></i></div>
+    <!-- pastila compactă: conținutul depinde de activitatea din ea -->
+    <div id="compact" class="layer" data-kind="">
+      <div class="c-slot c-media">
+        <img id="c-art" class="art" alt="" />
+        <div class="viz"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="c-slot c-timer">
+        <span class="c-icon" id="c-timer-icon"></span>
+        <span class="c-time" id="c-timer-text"></span>
+      </div>
+      <span class="dots" id="c-dots"><i class="dot mic"></i><i class="dot cam"></i></span>
     </div>
 
-    <div id="update" class="layer"></div>
+    <!-- bula: a doua activitate, ca pe iPhone -->
+    <div id="bubble" data-kind="">
+      <img id="b-art" alt="" />
+      <svg id="b-ring" viewBox="0 0 32 32"><circle class="bg" cx="16" cy="16" r="11" /><circle class="fg" cx="16" cy="16" r="11" /></svg>
+    </div>
+
+    <!-- activități tranzitorii: alertă, volum, notificare, update -->
+    <div id="transient" class="layer" data-kind="">
+      <div class="t-row t-alert">
+        <span class="t-icon" id="t-icon"></span>
+        <div class="t-text"><b id="t-title"></b><span id="t-detail"></span></div>
+        <svg id="t-ring" viewBox="0 0 24 24"><circle class="bg" cx="12" cy="12" r="9" /><circle class="fg" cx="12" cy="12" r="9" /></svg>
+      </div>
+      <div class="t-row t-volume">
+        <span class="t-icon" id="v-icon"></span>
+        <div class="v-track"><div id="v-fill"></div></div>
+        <span class="v-pct" id="v-pct"></span>
+      </div>
+      <div class="t-row t-notif">
+        <img id="n-icon" alt="" />
+        <div class="t-text"><span id="n-app"></span><b id="n-title"></b><span id="n-body"></span></div>
+      </div>
+    </div>
 
     <div id="expanded" class="layer">
-      <section id="x-media">
-        <div class="row-top">
-          <img id="x-art" class="art" alt="" />
-          <div class="meta">
-            <div id="x-title" class="title"></div>
-            <div id="x-artist" class="artist"></div>
+      <nav id="tabs"></nav>
+
+      <div class="pane" data-pane="home">
+        <section id="x-media">
+          <div class="row-top">
+            <img id="x-art" class="art" alt="" />
+            <div class="meta">
+              <div id="x-title" class="title"></div>
+              <div id="x-artist" class="artist"></div>
+            </div>
+            <div class="viz big"><i></i><i></i><i></i><i></i><i></i></div>
           </div>
-          <div class="viz big"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="progress">
+            <span id="x-pos">0:00</span>
+            <div class="track"><div id="x-fill" class="fill"></div></div>
+            <span id="x-rem">-0:00</span>
+          </div>
+          <div class="controls">
+            <button data-action="prev" aria-label="Anterior">
+              <svg viewBox="0 0 28 20"><path d="M13 4.2v11.6L4 10z M25 4.2v11.6L16 10z" /></svg>
+            </button>
+            <button data-action="play_pause" aria-label="Play/Pauză" id="x-play"></button>
+            <button data-action="next" aria-label="Următor">
+              <svg viewBox="0 0 28 20"><path d="M3 4.2v11.6L12 10z M15 4.2v11.6L24 10z" /></svg>
+            </button>
+          </div>
+        </section>
+        <section id="x-clock">
+          <div id="x-time" class="clock-time"></div>
+          <div id="x-date" class="clock-date"></div>
+        </section>
+        <div id="x-privacy" class="privacy-row" hidden></div>
+        <div id="x-apps" class="apps"></div>
+        <div id="x-update" class="update-row" hidden>
+          <span id="x-update-text"></span>
+          <button id="x-update-apply">Aplică</button>
         </div>
-        <div class="progress">
-          <span id="x-pos">0:00</span>
-          <div class="track"><div id="x-fill" class="fill"></div></div>
-          <span id="x-rem">-0:00</span>
-        </div>
-        <div class="controls">
-          <button data-action="prev" aria-label="Anterior">
-            <svg viewBox="0 0 28 20"><path d="M13 4.2v11.6L4 10z M25 4.2v11.6L16 10z" /></svg>
-          </button>
-          <button data-action="play_pause" aria-label="Play/Pauză" id="x-play"></button>
-          <button data-action="next" aria-label="Următor">
-            <svg viewBox="0 0 28 20"><path d="M3 4.2v11.6L12 10z M15 4.2v11.6L24 10z" /></svg>
-          </button>
-        </div>
-      </section>
-      <section id="x-clock">
-        <div id="x-time" class="clock-time"></div>
-        <div id="x-date" class="clock-date"></div>
-      </section>
-      <div id="x-apps" class="apps"></div>
-      <div id="x-update" class="update-row" hidden>
-        <span id="x-update-text"></span>
-        <button id="x-update-apply">Aplică</button>
       </div>
+
+      <div class="pane" data-pane="timer"></div>
+      <div class="pane" data-pane="shelf"></div>
+      <div class="pane" data-pane="mirror"></div>
     </div>
   </div>
   <script type="module" src="island.js"></script>

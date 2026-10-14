@@ -4,12 +4,12 @@ const K = 0.5523; // aproximarea unui sfert de cerc cu o curbă Bézier cubică
 
 const f = (n) => Math.round(n * 100) / 100;
 
-export function islandPath(canvasWidth, w, h, r, ear) {
+export function islandPath(canvasWidth, w, h, r, ear, cx = canvasWidth / 2) {
   w = Math.max(0, w);
   h = Math.max(0, h);
   r = Math.max(0, Math.min(r, h / 2, w / 2));
   ear = Math.max(0, Math.min(ear, h - r, w / 4));
-  const x0 = (canvasWidth - w) / 2;
+  const x0 = cx - w / 2;
   const x1 = x0 + w;
   return [
     `M${f(x0 - ear)} 0`,

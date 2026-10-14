@@ -28,3 +28,9 @@ test('rect-ul include urechile și e centrat', () => {
   assert.deepEqual(r, { x: 154, y: 0, w: 212, h: 32 });
   assert.equal(r.x + r.w / 2, 260);
 });
+
+test('forma poate fi desenată cu alt centru (bula de lângă pastilă)', () => {
+  const d = islandPath(520, 32, 32, 16, 0, 400);
+  assert.ok(d.startsWith('M384 0'));
+  assert.ok(d.includes('L416 0'));
+});

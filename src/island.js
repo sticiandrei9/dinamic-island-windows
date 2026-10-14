@@ -1,29 +1,45 @@
 import { Spring } from './lib/spring.js';
 import { islandPath, islandRect } from './lib/shape.js';
+import { sizeScale } from './lib/util.js';
+import { layout, enqueue, advance, current } from './lib/activities.js';
+import { ICONS, speakerIcon } from './icons.js';
 import { MediaView } from './media-view.js';
 import { AppsView } from './apps-view.js';
-import { sizeScale } from './lib/util.js';
 
 const W = 520;
 const EAR = 7;
-const SIZES = {
-  idle: { w: 190, h: 32, r: 10 },
-  active: { w: 300, h: 32, r: 10 },
-  expandedMedia: { w: 420, h: 206, r: 36 },
-  expandedIdle: { w: 360, h: 140, r: 32 },
+const BUBBLE = 32;
+const GAP = 8;
+// lățimea pastilei compacte după activitatea din ea
+const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250 };
+// mărimea insulei pentru fiecare tip de activitate tranzitorie
+const TRANSIENT = {
+  alert: { w: 340, h: 40, r: 18 },
+  update: { w: 330, h: 36, r: 16 },
+  volume: { w: 310, h: 36, r: 16 },
+  notification: { w: 400, h: 78, r: 26 },
 };
+const EXPANDED_W = { home: 420, timer: 380, shelf: 440, mirror: 360 };
 const SPRING = { response: 0.5, damping: 0.72 };
 
 const tauri = window.__TAURI__;
 const demo = !tauri && new URLSearchParams(location.search).has('demo');
 const invoke = (cmd, args) => (tauri ? tauri.core.invoke(cmd, args) : demoInvoke(cmd, args));
+const $ = (id) => document.getElementById(id);
 
-const pathEl = document.getElementById('shape-path');
-const compactEl = document.getElementById('compact');
-const updateEl = document.getElementById('update');
+const pathEl = $('shape-path');
+const bubblePathEl = $('bubble-path');
+const compactEl = $('compact');
+const bubbleEl = $('bubble');
+const transientEl = $('transient');
+const expandedEl = $('expanded');
+const tabsEl = $('tabs');
 
 // pornește de la lățime 0, deci insula „crește” la pornire
-const springs = { w: new Spring(0, SPRING), h: new Spring(32, SPRING), r: new Spring(10, SPRING) };
+const springs = {
+  w: new Spring(0, SPRING), h: new Spring(32, SPRING), r: new Spring(10, SPRING),
+  bw: new Spring(0, SPRING), bg: new Spring(0, SPRING),
+};
 let expanded = false;
 let raf = 0;
 let lastFrame = 0;
@@ -31,17 +47,77 @@ let rect = { x: 0, y: 0, w: 0, h: 0 };
 let lastRectKey = '';
 let zoom = 1;
 let expandOnHover = true;
-let mediaEnabled = true;
+let settings = null;
 
-const media = new MediaView({ invoke, onChange: retarget });
+const persistent = new Map(); // id → activitate (media, timer…)
+let queue = []; // activități tranzitorii
+let shown = null; // tranzitoria afișată acum
+let tab = 'home';
+const panes = new Map(); // id → { module, icon, onShow, onHide, badge }
+
+// ---------------- API pentru module ----------------
+export const island = {
+  invoke,
+  tauri,
+  get settings() { return settings; },
+  get expanded() { return expanded; },
+  setActivity(id, activity) {
+    if (activity) persistent.set(id, { id, ...activity });
+    else persistent.delete(id);
+    renderActivities();
+  },
+  pushTransient(activity) {
+    queue = enqueue(advance(queue, performance.now()), activity, performance.now());
+    tickTransient();
+  },
+  dropTransients(kind) {
+    queue = queue.filter((a) => a.kind !== kind);
+    tickTransient();
+  },
+  registerPane(id, def) {
+    panes.set(id, def);
+    renderTabs();
+  },
+  setBadge(id, text) {
+    const p = panes.get(id);
+    if (p) { p.badge = text; renderTabs(); }
+  },
+  expandTo(id) {
+    clearTimeout(hoverTimer);
+    setExpanded(true, id);
+  },
+  collapse: () => setExpanded(false),
+  refresh: () => retarget(),
+};
+
+// ---------------- media + aplicații (fila Acasă) ----------------
+const media = new MediaView({
+  invoke,
+  onChange: () => island.setActivity('media', media.hasMedia() ? { kind: 'media' } : null),
+});
 const apps = new AppsView({ invoke, onPicked: () => setExpanded(false) });
+panes.set('home', {
+  module: null,
+  icon: ICONS.home,
+  title: 'Acasă',
+  onShow: () => { media.setExpanded(true); apps.setActive(true); updateClock(); },
+  onHide: () => { media.setExpanded(false); apps.setActive(false); },
+});
+
+// ---------------- dimensiuni ----------------
+function activeLayout() {
+  return layout([...persistent.values()]);
+}
 
 function targetSize() {
   if (expanded) {
-    const base = media.hasMedia() ? SIZES.expandedMedia : SIZES.expandedIdle;
-    return document.body.classList.contains('has-update') ? { ...base, h: base.h + 26 } : base;
+    const w = tab === 'home' && !media.hasMedia() ? 360 : EXPANDED_W[tab] ?? 420;
+    const h = Math.min(330, Math.max(60, expandedEl.offsetHeight + 2));
+    return { w, h, r: h > 150 ? 36 : 28 };
   }
-  return media.hasMedia() ? SIZES.active : SIZES.idle;
+  if (shown) return TRANSIENT[shown.kind] ?? TRANSIENT.alert;
+  const { pill } = activeLayout();
+  return { w: COMPACT_W[pill?.kind ?? ''] ?? 250, h: 32, r: 10 };
 }
 
 function retarget() {
@@ -49,7 +125,11 @@ function retarget() {
   springs.w.setTarget(t.w);
   springs.h.setTarget(t.h);
   springs.r.setTarget(t.r);
+  const showBubble = !expanded && !shown && !!activeLayout().bubble;
+  springs.bw.setTarget(showBubble ? BUBBLE : 0);
+  springs.bg.setTarget(showBubble ? GAP : 0);
   document.body.classList.toggle('expanded', expanded);
+  document.body.classList.toggle('transient', !!shown && !expanded);
   if (!raf) {
     lastFrame = performance.now();
     raf = requestAnimationFrame(frame);
@@ -67,11 +147,20 @@ function frame(now) {
 }
 
 function render() {
-  const w = springs.w.value, h = springs.h.value, r = springs.r.value;
+  const w = Math.max(0, springs.w.value), h = Math.max(0, springs.h.value), r = springs.r.value;
   pathEl.setAttribute('d', islandPath(W, w, h, r, EAR));
-  compactEl.style.width = `${Math.max(0, w)}px`;
-  updateEl.style.width = `${Math.max(0, w)}px`;
-  rect = islandRect(W, Math.max(0, w), Math.max(0, h), EAR);
+  compactEl.style.width = `${w}px`;
+  transientEl.style.width = `${w}px`;
+  transientEl.style.height = `${h}px`;
+
+  // bula se „desprinde” din marginea dreaptă a pastilei
+  const bw = Math.max(0, springs.bw.value);
+  const bcx = W / 2 + w / 2 + EAR + Math.max(0, springs.bg.value) + bw / 2;
+  bubblePathEl.setAttribute('d', bw > 0.5 ? islandPath(W, bw, bw, bw / 2, Math.min(EAR, bw / 4), bcx) : '');
+  bubbleEl.style.left = `${bcx - BUBBLE / 2}px`;
+
+  const pill = islandRect(W, w, h, EAR);
+  rect = bw > 0.5 ? { x: pill.x, y: 0, w: bcx + bw / 2 + EAR - pill.x, h: Math.max(h, bw) } : pill;
   const key = [rect.x, rect.w, rect.h].map(Math.round).join(',');
   if (key !== lastRectKey) {
     lastRectKey = key;
@@ -79,12 +168,109 @@ function render() {
   }
 }
 
-function setExpanded(on) {
-  if (expanded === on) return;
-  expanded = on;
-  media.setExpanded(on);
-  apps.setActive(on);
-  updateClock();
+// măsurăm conținutul insulei extinse (versuri, rânduri opționale) și adaptăm înălțimea
+new ResizeObserver(() => expanded && retarget()).observe(expandedEl);
+
+// ---------------- activități ----------------
+function renderActivities() {
+  const { pill, bubble } = activeLayout();
+  compactEl.dataset.kind = pill?.kind ?? '';
+  bubbleEl.dataset.kind = bubble?.kind ?? '';
+  if (bubble?.kind === 'media') $('b-art').src = $('c-art').src;
+  if (bubble?.kind === 'timer' || bubble?.kind === 'stopwatch') {
+    const p = Math.max(0, Math.min(1, bubble.progress ?? 0));
+    bubbleEl.querySelector('.fg').style.strokeDashoffset = `${69.1 * (1 - p)}`;
+  }
+  retarget();
+}
+
+let ticker = 0;
+function tickTransient() {
+  const now = performance.now();
+  queue = advance(queue, now);
+  const next = current(queue, now);
+  if (next !== shown) {
+    shown = next;
+    if (shown) renderTransient(shown);
+    retarget();
+  }
+  clearInterval(ticker);
+  if (queue.length) ticker = setInterval(tickTransient, 100);
+}
+
+function renderTransient(t) {
+  transientEl.dataset.kind = t.kind;
+  if (t.kind === 'alert' || t.kind === 'update') {
+    transientEl.style.setProperty('--t-color', t.color ?? 'var(--fg)');
+    $('t-icon').innerHTML = ICONS[t.icon] ?? ICONS.bell;
+    $('t-title').textContent = t.title ?? '';
+    $('t-detail').textContent = t.detail ?? '';
+    const ring = $('t-ring');
+    ring.classList.toggle('on', typeof t.level === 'number');
+    if (typeof t.level === 'number') ring.querySelector('.fg').style.strokeDashoffset = `${56.5 * (1 - t.level)}`;
+  } else if (t.kind === 'volume') {
+    $('v-icon').innerHTML = t.source === 'brightness' ? ICONS.sun : speakerIcon(t.waves ?? 2, t.muted);
+    $('v-fill').style.width = `${Math.round((t.muted ? 0 : t.level) * 100)}%`;
+    $('v-pct').textContent = t.muted ? '—' : `${Math.round(t.level * 100)}%`;
+  } else if (t.kind === 'notification') {
+    $('n-icon').src = t.icon ?? '';
+    $('n-app').textContent = t.app ?? '';
+    $('n-title').textContent = t.title ?? '';
+    $('n-body').textContent = t.body ?? '';
+  }
+}
+
+// ---------------- file ----------------
+function availableTabs() {
+  return [...panes.entries()].filter(([, p]) => !p.module || settings?.modules?.[p.module] !== false);
+}
+
+function renderTabs() {
+  const list = availableTabs();
+  tabsEl.replaceChildren();
+  tabsEl.classList.toggle('single', list.length < 2);
+  for (const [id, p] of list) {
+    const b = document.createElement('button');
+    b.title = p.title;
+    b.innerHTML = p.icon; // pictogramă constantă din icons.js
+    b.classList.toggle('on', id === tab);
+    if (p.badge) {
+      const s = document.createElement('span');
+      s.className = 'badge';
+      s.textContent = p.badge;
+      b.append(s);
+    }
+    b.addEventListener('click', (e) => { e.stopPropagation(); setTab(id); });
+    tabsEl.append(b);
+  }
+  if (!list.some(([id]) => id === tab)) setTab('home');
+}
+
+function setTab(id) {
+  if (id === tab && document.querySelector(`.pane[data-pane="${id}"]`).classList.contains('on')) return;
+  if (expanded) panes.get(tab)?.onHide?.();
+  tab = id;
+  document.body.dataset.tab = id;
+  document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === id));
+  tabsEl.querySelectorAll('button').forEach((b, i) => b.classList.toggle('on', availableTabs()[i]?.[0] === id));
+  if (expanded) panes.get(id)?.onShow?.();
+  requestAnimationFrame(retarget);
+}
+
+function setExpanded(on, toTab) {
+  if (expanded === on && !toTab) return;
+  if (on) {
+    const { pill } = activeLayout();
+    const wanted = toTab ?? (pill?.kind === 'timer' || pill?.kind === 'stopwatch' ? 'timer' : 'home');
+    const target = availableTabs().some(([id]) => id === wanted) ? wanted : 'home';
+    if (expanded) { setTab(target); return; }
+    expanded = true;
+    tab = '';
+    setTab(target);
+  } else {
+    expanded = false;
+    panes.get(tab)?.onHide?.();
+  }
   retarget();
 }
 
@@ -96,74 +282,78 @@ function onHover(inside) {
   hoverTimer = setTimeout(() => setExpanded(inside), inside ? 120 : 220);
 }
 
-document.getElementById('stage').addEventListener('click', () => {
+$('stage').addEventListener('click', () => {
   if (!expanded) {
     clearTimeout(hoverTimer);
     setExpanded(true);
   }
 });
+bubbleEl.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const kind = bubbleEl.dataset.kind;
+  island.expandTo(kind === 'timer' || kind === 'stopwatch' ? 'timer' : 'home');
+});
 
 function updateClock() {
   const now = new Date();
-  document.getElementById('x-time').textContent = now.toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+  $('x-time').textContent = now.toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
   const date = now.toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' });
-  document.getElementById('x-date').textContent = date.charAt(0).toUpperCase() + date.slice(1);
+  $('x-date').textContent = date.charAt(0).toUpperCase() + date.slice(1);
 }
-setInterval(() => expanded && updateClock(), 1000);
+setInterval(() => expanded && tab === 'home' && updateClock(), 1000);
 
-// setări: mărime, mod de extindere, module
+// ---------------- setări ----------------
 function applySettings(st) {
   if (!st) return;
+  settings = st;
   zoom = sizeScale(st.size);
-  document.getElementById('stage').style.zoom = zoom;
+  $('stage').style.zoom = zoom;
   expandOnHover = st.expand_on !== 'click';
   document.body.classList.toggle('no-apps', !st.modules.apps);
-  mediaEnabled = st.modules.media;
-  if (!mediaEnabled && media.hasMedia()) media.update(null);
+  if (!st.modules.media && media.hasMedia()) media.update(null);
+  renderTabs();
+  window.dispatchEvent(new CustomEvent('island-settings', { detail: st }));
 }
 
+// ---------------- evenimente din Rust ----------------
 if (tauri) {
   const self = tauri.webviewWindow.getCurrentWebviewWindow();
   invoke('get_settings').then(applySettings).catch(() => {});
   tauri.event.listen('settings-changed', (e) => applySettings(e.payload));
   // evenimente trimise doar acestei insule (fiecare monitor are fereastra lui)
   self.listen('island-hover', (e) => onHover(!!e.payload));
-  // după ce ascultăm, cerem și starea curentă (evenimentele de dinainte de încărcare s-au pierdut)
-  tauri.event.listen('media-update', (e) => mediaEnabled && media.update(e.payload ?? null))
-    .then(() => invoke('media_current'))
-    .then((info) => { if (info && mediaEnabled && !media.hasMedia()) media.update(info); })
-    .catch(() => {});
-  tauri.event.listen('update-installing', (e) => {
-    document.getElementById('update').textContent = `Actualizare la v${e.payload}`;
-    document.body.classList.add('updating');
-    setExpanded(false);
-  });
-  tauri.event.listen('update-failed', () => document.body.classList.remove('updating'));
-  // update descărcat: anunț scurt în pastilă + rândul „Aplică” în insula extinsă
-  let announced = '';
-  const onUpdateState = (st) => {
-    const ready = st?.kind === 'ready';
-    document.getElementById('x-update').hidden = !ready;
-    document.body.classList.toggle('has-update', ready);
-    if (!ready) return;
-    document.getElementById('x-update-text').textContent = `v${st.version} disponibilă`;
-    if (announced === st.version) return;
-    announced = st.version;
-    updateEl.textContent = `Actualizare disponibilă v${st.version}`;
-    document.body.classList.add('updating');
-    setTimeout(() => document.body.classList.remove('updating'), 4000);
-    retarget();
-  };
-  tauri.event.listen('update-state', (e) => onUpdateState(e.payload));
-  invoke('get_update_state').then(onUpdateState).catch(() => {});
-  document.getElementById('x-update-apply').addEventListener('click', (e) => {
-    e.stopPropagation();
-    invoke('apply_update').catch(() => {});
-  });
-  // ascunsă cât timp o aplicație rulează pe tot ecranul
   self.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);
     if (!e.payload) setExpanded(false);
+  });
+  // după ce ascultăm, cerem și starea curentă (evenimentele de dinainte de încărcare s-au pierdut)
+  const mediaOn = () => settings?.modules?.media !== false;
+  tauri.event.listen('media-update', (e) => mediaOn() && media.update(e.payload ?? null))
+    .then(() => invoke('media_current'))
+    .then((info) => { if (info && mediaOn() && !media.hasMedia()) media.update(info); })
+    .catch(() => {});
+
+  // update-uri: anunț în pastilă + rândul „Aplică” în insula extinsă
+  let announced = '';
+  const onUpdateState = (st) => {
+    const ready = st?.kind === 'ready';
+    $('x-update').hidden = !ready;
+    if (!ready) return;
+    $('x-update-text').textContent = `v${st.version} disponibilă`;
+    if (announced === st.version) return;
+    announced = st.version;
+    island.pushTransient({ kind: 'update', icon: 'download', color: 'var(--green)', title: 'Actualizare disponibilă', detail: `v${st.version}`, duration: 4000 });
+  };
+  tauri.event.listen('update-state', (e) => onUpdateState(e.payload));
+  invoke('get_update_state').then(onUpdateState).catch(() => {});
+  tauri.event.listen('update-installing', (e) => {
+    setExpanded(false);
+    island.pushTransient({ kind: 'update', icon: 'download', color: 'var(--green)', title: 'Se instalează', detail: `v${e.payload}`, duration: 120000 });
+  });
+  tauri.event.listen('update-failed', () => island.dropTransients('update'));
+  $('x-update-apply').addEventListener('click', (e) => {
+    e.stopPropagation();
+    invoke('apply_update').catch(() => {});
   });
 } else {
   // în browser: hover calculat local, cu același dreptunghi ca în Rust
@@ -174,10 +364,18 @@ if (tauri) {
     if (now !== inside) { inside = now; onHover(now); }
   });
   document.addEventListener('pointerleave', () => { inside = false; onHover(false); });
+  applySettings({ size: 'normal', expand_on: 'hover', modules: {} });
   if (demo) startDemo();
 }
 
+document.body.dataset.tab = 'home';
+renderTabs();
 retarget();
+
+// modulele noi se încarcă după ce API-ul insulei există
+for (const mod of ['./timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './shelf-view.js', './mirror-view.js']) {
+  import(mod).then((m) => m.init?.(island)).catch(() => {});
+}
 
 // ---------------- mod demo (doar în browser, pentru verificat designul) ----------------
 function demoArt(hue) {
@@ -197,16 +395,17 @@ const demoTracks = [
 ];
 let demoIdx = 0;
 let demoInfo = null;
-function demoEmit(patch) {
-  demoInfo = { ...demoInfo, ...patch };
-  media.update(demoInfo);
-}
 function startDemo() {
   setTimeout(() => {
     const t = demoTracks[0];
     demoInfo = { title: t.title, artist: t.artist, album: '', thumbnail: demoArt(t.hue), playing: true, position: 37, duration: t.duration, source: 'Spotify' };
     media.update(demoInfo);
   }, 900);
+  const p = new URLSearchParams(location.search);
+  if (p.has('timer')) setTimeout(() => island.setActivity('timer', { kind: 'timer', progress: 0.6 }), 1200);
+  if (p.has('alert')) setTimeout(() => island.pushTransient({ kind: 'alert', icon: 'headphones', title: 'AirPods Pro', detail: 'Conectat', level: 0.8, color: 'var(--fg)', duration: 4000 }), 1500);
+  if (p.has('volume')) setTimeout(() => island.pushTransient({ kind: 'volume', level: 0.62, waves: 2, duration: 3000 }), 1500);
+  if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);
 }
 async function demoInvoke(cmd, args) {
   if (!demo) return null;
@@ -214,7 +413,8 @@ async function demoInvoke(cmd, args) {
     if (args.action === 'play_pause') return null; // starea e deja comutată optimist
     demoIdx = (demoIdx + (args.action === 'next' ? 1 : demoTracks.length - 1)) % demoTracks.length;
     const t = demoTracks[demoIdx];
-    demoEmit({ title: t.title, artist: t.artist, thumbnail: demoArt(t.hue), position: 0, duration: t.duration, playing: true });
+    demoInfo = { ...demoInfo, title: t.title, artist: t.artist, thumbnail: demoArt(t.hue), position: 0, duration: t.duration, playing: true };
+    media.update(demoInfo);
   }
   if (cmd === 'list_windows') {
     return ['Chrome', 'Spotify', 'Code', 'Explorer', 'Discord'].map((n, i) => ({ hwnd: i + 1, title: n, exe: n.toLowerCase() + '.exe', icon: null }));

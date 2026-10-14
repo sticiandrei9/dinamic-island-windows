@@ -103,7 +103,11 @@ setInterval(() => expanded && updateClock(), 1000);
 
 if (tauri) {
   tauri.event.listen('island-hover', (e) => onHover(!!e.payload));
-  tauri.event.listen('media-update', (e) => media.update(e.payload ?? null));
+  // după ce ascultăm, cerem și starea curentă (evenimentele de dinainte de încărcare s-au pierdut)
+  tauri.event.listen('media-update', (e) => media.update(e.payload ?? null))
+    .then(() => invoke('media_current'))
+    .then((info) => { if (info && !media.hasMedia()) media.update(info); })
+    .catch(() => {});
   // ascunsă cât timp o aplicație rulează pe tot ecranul
   tauri.event.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);

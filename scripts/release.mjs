@@ -4,7 +4,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { validateVersion, setVersion, assetName, manifest, recoveryHint, VERSION_FILES } from './release-lib.mjs';
+import { validateVersion, setVersion, assetName, manifest, recoveryHint, builtInstaller, VERSION_FILES } from './release-lib.mjs';
 
 const REPO = 'sticiandrei9/dinamic-island-windows';
 const KEY = join(homedir(), '.tauri', 'dynamic-island.key');
@@ -44,7 +44,8 @@ try {
   process.exit(1);
 }
 
-const built = `src-tauri/target/release/bundle/nsis/Dynamic Island_${version}_x64-setup.exe`;
+const targetDir = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: 'src-tauri' })).target_directory;
+const built = builtInstaller(targetDir, version);
 mkdirSync(OUT, { recursive: true });
 const asset = `${OUT}/${assetName(version)}`;
 copyFileSync(built, asset);

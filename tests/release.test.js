@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateVersion, setVersion, assetName, manifest, recoveryHint } from '../scripts/release-lib.mjs';
+import { validateVersion, setVersion, assetName, manifest, recoveryHint, builtInstaller } from '../scripts/release-lib.mjs';
+
+test('installerul e căutat în folderul de compilare raportat de cargo', () => {
+  assert.equal(builtInstaller('C:/Users/A/.cargo-target/di', '0.2.0'),
+    'C:/Users/A/.cargo-target/di/release/bundle/nsis/Dynamic Island_0.2.0_x64-setup.exe');
+});
 
 test('după un build eșuat, indicația readuce fișierele de versiune', () => {
   const h = recoveryHint('build', '0.2.0', 'u/r');

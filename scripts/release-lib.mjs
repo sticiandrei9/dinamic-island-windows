@@ -23,6 +23,11 @@ export function assetName(version) {
   return `DynamicIsland_${version}_x64-setup.exe`;
 }
 
+// Installerul produs de `tauri build`, în folderul de compilare al cargo (poate fi în afara repo-ului).
+export function builtInstaller(targetDir, version) {
+  return `${targetDir}/release/bundle/nsis/Dynamic Island_${version}_x64-setup.exe`;
+}
+
 export const VERSION_FILES = ['package.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json'];
 
 // Ce rulezi ca să repari un release oprit la jumătate, în funcție de pasul care a eșuat.

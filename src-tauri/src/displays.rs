@@ -188,6 +188,6 @@ mod tests {
     fn pozitia_ferestrei_centrata_sus() {
         let m = MonitorInfo { name: "A".into(), x: 1920, y: -200, width: 2560, height: 1440, scale: 1.5, primary: false };
         // 520 logic × scara mărimii 1.15 × DPI 1.5 = 897 px fizici
-        assert_eq!(island_geometry(&m, 1.15), (1920 + (2560 - 897) / 2, -200, 897, 587));
+        assert_eq!(island_geometry(&m, 1.15), (1920 + (2560 - 897) / 2, -200, 897, 586)); // 340 × 1,15 × 1,5 = 586,4999… în virgulă mobilă
     }
 }

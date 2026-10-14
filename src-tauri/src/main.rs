@@ -5,6 +5,7 @@ mod dev_demo;
 mod displays;
 mod hittest;
 mod media;
+mod notifications;
 mod platform;
 mod privacy;
 mod settings;
@@ -77,6 +78,7 @@ fn main() {
             alerts::spawn(app.handle().clone());
             dev_demo::spawn(app.handle().clone());
             volume::spawn(app.handle().clone());
+            notifications::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
             if std::env::var_os("DI_OPEN_SETTINGS").is_some() {

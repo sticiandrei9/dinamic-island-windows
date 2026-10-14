@@ -184,6 +184,11 @@ unsafe fn load_icon(path: &str) -> Option<String> {
     png.map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
 }
 
+/// Numele exe-ului unui proces („ShellExperienceHost.exe”), sau gol dacă nu poate fi citit.
+pub fn exe_name(pid: u32) -> String {
+    unsafe { exe_path(pid) }.and_then(|p| p.rsplit('\\').next().map(str::to_string)).unwrap_or_default()
+}
+
 fn icon_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)

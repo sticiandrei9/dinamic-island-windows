@@ -10,7 +10,7 @@ const MODULES = [
   ['timer', 'Timer și cronometru', 'Timpul rămas apare în insulă'],
   ['privacy', 'Microfon și cameră', 'Punct portocaliu / verde când sunt folosite'],
   ['alerts', 'Alerte de sistem', 'Încărcător, baterie, dispozitive Bluetooth'],
-  ['volume', 'Volum și luminozitate', 'Afișate în insulă în locul pop-up-ului Windows'],
+  ['volume', 'Volum și luminozitate', 'Afișate în insulă (pe Windows 11 rămâne și pop-up-ul sistemului)'],
   ['notifications', 'Notificări Windows', 'Notificările apar și în insulă'],
   ['shelf', 'Raft de fișiere', 'Trage fișiere pe insulă ca să le ai la îndemână'],
   ['mirror', 'Oglindă cameră', 'Vezi-te înainte de un apel'],

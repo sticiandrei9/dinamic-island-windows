@@ -11,6 +11,7 @@ mod settings;
 mod timer;
 mod tray;
 mod updater;
+mod volume;
 mod windows_list;
 
 use tauri::Manager;
@@ -75,6 +76,7 @@ fn main() {
             privacy::spawn(app.handle().clone());
             alerts::spawn(app.handle().clone());
             dev_demo::spawn(app.handle().clone());
+            volume::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
             if std::env::var_os("DI_OPEN_SETTINGS").is_some() {
@@ -82,6 +84,11 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("eroare la pornirea aplicației");
+        .build(tauri::generate_context!())
+        .expect("eroare la pornirea aplicației")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                volume::restore_osd(); // pop-up-ul de volum al Windows revine
+            }
+        });
 }

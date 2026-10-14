@@ -3,6 +3,7 @@
 mod hittest;
 mod media;
 mod platform;
+mod windows_list;
 
 use tauri::Manager;
 
@@ -14,6 +15,8 @@ fn main() {
             hittest::set_island_rect,
             media::media_control,
             media::media_current,
+            windows_list::list_windows,
+            windows_list::focus_window,
         ])
         .setup(|app| {
             let win = app.get_webview_window("island").expect("fereastra island lipsește");

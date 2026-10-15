@@ -53,6 +53,33 @@ pub fn caps_alert(on: bool) -> Alert {
     }
 }
 
+/// Anunțurile proprii ale unor laptopuri, afișate sus pe mijloc, peste insulă (GIGABYTE Control Center).
+pub fn is_vendor_osd(exe: &str) -> bool {
+    exe.eq_ignore_ascii_case("OSDwindow.exe")
+}
+
+/// Ascunde anunțul de Caps Lock al producătorului (insula îl arată pe al ei). Îl căutăm 1,5 s, cât apare;
+/// celelalte anunțuri ale lui (touchpad, mod avion) rămân, fiindcă ascundem doar după Caps Lock.
+fn hide_vendor_osd() {
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, IsWindowVisible, ShowWindow, SW_HIDE};
+    std::thread::spawn(|| {
+        for _ in 0..50 {
+            let mut list: Vec<windows::Win32::Foundation::HWND> = Vec::new();
+            unsafe {
+                let _ = EnumWindows(Some(crate::platform::collect_hwnd), windows::Win32::Foundation::LPARAM(&mut list as *mut _ as isize));
+                for h in list {
+                    let mut pid = 0u32;
+                    GetWindowThreadProcessId(h, Some(&mut pid));
+                    if IsWindowVisible(h).as_bool() && is_vendor_osd(&crate::windows_list::exe_name(pid)) {
+                        let _ = ShowWindow(h, SW_HIDE);
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    });
+}
+
 /// Fereastra activă și limba ei de tastatură.
 fn foreground_layout() -> (isize, u16) {
     unsafe {
@@ -82,6 +109,7 @@ pub fn spawn(app: AppHandle) {
             }
             let on = unsafe { GetKeyState(VK_CAPITAL.0 as i32) } & 1 == 1;
             if caps.is_some_and(|c| c != on) {
+                hide_vendor_osd();
                 let _ = app.emit("kb-alert", caps_alert(on));
             }
             caps = Some(on);
@@ -99,6 +127,12 @@ mod tests {
         assert!(!layout_changed(Some((1, 0x418)), (2, 0x419))); // altă fereastră
         assert!(!layout_changed(Some((1, 0x418)), (1, 0x418)));
         assert!(!layout_changed(None, (1, 0x419))); // la pornire nu se anunță
+    }
+
+    #[test]
+    fn anuntul_gigabyte() {
+        assert!(is_vendor_osd("OSDwindow.exe") && is_vendor_osd("osdwindow.EXE"));
+        assert!(!is_vendor_osd("explorer.exe"));
     }
 
     #[test]

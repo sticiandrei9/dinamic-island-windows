@@ -45,6 +45,28 @@ pub fn make_no_activate(win: &WebviewWindow) {
     }
 }
 
+/// O fereastră Win32 ascunsă, proprietarul insulelor: ferestrele cu proprietar nu apar în Alt+Tab
+/// (`WS_EX_TOOLWINDOW` ar face același lucru, dar adăugat după creare desenează o bară de titlu).
+/// Se creează pe thread-ul principal, care are bucla de mesaje.
+pub fn create_hidden_owner() -> Option<isize> {
+    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, WINDOW_EX_STYLE, WS_POPUP};
+    unsafe {
+        CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!("Dynamic Island"), WS_POPUP, 0, 0, 0, 0, None, None, None, None)
+            .ok()
+            .map(|h| h.0 as isize)
+    }
+}
+
+pub fn set_owner(win: &WebviewWindow, owner: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::GWLP_HWNDPARENT;
+    if let Some(h) = hwnd_of(win) {
+        unsafe {
+            SetWindowLongPtrW(h, GWLP_HWNDPARENT, owner);
+        }
+    }
+}
+
 /// Afișează fereastra prin Tauri (ShowWindow direct strică rama fără margini a lui tao),
 /// apoi redă focusul ferestrei care îl avea înainte.
 pub fn show_keep_focus(win: &WebviewWindow) -> tauri::Result<()> {

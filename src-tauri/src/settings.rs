@@ -180,6 +180,9 @@ pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, mut sett
     if previous.language != settings.language {
         crate::i18n::set_current(settings.lang());
         crate::tray::refresh_texts(&app);
+        if let Some(w) = tauri::Manager::get_webview_window(&app, "settings") {
+            let _ = w.set_title(&crate::i18n::t("settings.title"));
+        }
     }
     let _ = app.emit("settings-changed", payload(&settings));
     // ferestrele se creează în afara thread-ului comenzii (crearea dintr-o comandă sincronă blochează)

@@ -47,3 +47,10 @@ export function holdHead(queue, now, keepMs = 1500) {
   if (!head?.interactive || head.startedAt + head.duration >= now + keepMs) return queue;
   return [{ ...head, startedAt: now + keepMs - head.duration }, ...queue.slice(1)];
 }
+
+// Scoate tranzitoriile de un anumit tip; dacă a plecat cea afișată, următoarea începe acum.
+export function drop(queue, kind, now) {
+  const q = queue.filter((a) => a.kind !== kind);
+  if (q.length && q[0].startedAt == null) q[0] = { ...q[0], startedAt: now };
+  return q;
+}

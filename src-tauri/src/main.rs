@@ -105,6 +105,7 @@ fn main() {
             app.manage(shelf::ShelfState::load(app.path().app_config_dir()?.join("shelf.json")));
 
             updater::install_pending_at_startup(app.handle());
+            displays::init_owner();
             displays::sync_windows(app.handle());
             displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());

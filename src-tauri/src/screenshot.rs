@@ -15,6 +15,12 @@ pub fn is_capture_tool(exe: &str) -> bool {
     CAPTURE_TOOLS.iter().any(|t| t.eq_ignore_ascii_case(exe))
 }
 
+/// O imagine nouă în clipboard e o captură de ecran dacă a pus-o un instrument de captură sau dacă
+/// fereastra de selecție a unuia a fost în prim-plan cu cel mult 10 s înainte.
+pub fn is_screenshot(owner_exe: &str, tool_seen_ms_ago: Option<u64>) -> bool {
+    is_capture_tool(owner_exe) || tool_seen_ms_ago.is_some_and(|ms| ms <= 10_000)
+}
+
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?))
 }
@@ -152,6 +158,19 @@ mod win {
         unsafe { IsClipboardFormatAvailable(CF_DIB).is_ok() }
     }
 
+    /// Exe-ul ferestrei din prim-plan.
+    pub fn foreground_exe() -> String {
+        unsafe {
+            let h = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            if h.0.is_null() {
+                return String::new();
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(h, Some(&mut pid));
+            crate::windows_list::exe_name(pid)
+        }
+    }
+
     pub fn owner_exe() -> String {
         unsafe {
             let Ok(h) = GetClipboardOwner() else { return String::new() };
@@ -197,8 +216,16 @@ pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut seq = win::sequence();
         let mut next_id = 1u64;
+        let mut tool_seen: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(Duration::from_millis(400));
+            let fg = win::foreground_exe();
+            if is_capture_tool(&fg) {
+                if tool_seen.is_none() {
+                    log::debug!("captură: instrumentul de captură e în prim-plan ({fg})");
+                }
+                tool_seen = Some(std::time::Instant::now());
+            }
             let s = win::sequence();
             if s == seq {
                 continue;
@@ -208,8 +235,8 @@ pub fn spawn(app: AppHandle) {
                 continue;
             }
             let owner = win::owner_exe();
-            if !is_capture_tool(&owner) {
-                log::debug!("clipboard: imagine de la „{owner}”, nu e o captură de ecran");
+            if !is_screenshot(&owner, tool_seen.map(|t| t.elapsed().as_millis() as u64)) {
+                log::debug!("clipboard: imagine de la „{owner}” (prim-plan: {fg}), nu e o captură de ecran");
                 continue;
             }
             let Some((w, h, rgba)) = win::read_dib().as_deref().and_then(dib_to_rgba) else {
@@ -218,6 +245,7 @@ pub fn spawn(app: AppHandle) {
             };
             let (tw, th) = thumb_size(w, h, 240, 135);
             let Some(png) = crate::windows_list::encode_png(&downscale(&rgba, w, h, tw, th), tw, th) else { continue };
+            tool_seen = None; // o singură captură per selecție
             let id = next_id;
             next_id += 1;
             *app.state::<ScreenshotState>().0.lock().unwrap() = Some(Shot { id, w, h, rgba, at_ms: now_ms(), saved: None });
@@ -268,6 +296,7 @@ fn save_shot(app: &AppHandle, id: u64) -> Result<PathBuf, String> {
             path
         }
     };
+    log::info!("captură salvată: {}", path.display());
     shot.saved = Some(path.clone());
     Ok(path)
 }
@@ -357,6 +386,17 @@ mod tests {
         let taken = [dir.join("Captură.png"), dir.join("Captură (2).png")];
         assert_eq!(unique_name(dir, "Captură", |p| taken.iter().any(|t| t == p)), dir.join("Captură (3).png"));
         assert_eq!(unique_name(dir, "Nou", |_| false), dir.join("Nou.png"));
+    }
+
+    #[test]
+    fn captura_dupa_fereastra_instrumentului() {
+        // Instrumentul de decupare golește proprietarul clipboard-ului; îl recunoaștem după fereastra
+        // lui de selecție, văzută în prim-plan cu puțin înainte
+        assert!(is_screenshot("", Some(1_500)));
+        assert!(is_screenshot("SnippingTool.exe", None));
+        assert!(!is_screenshot("", Some(20_000)));
+        assert!(!is_screenshot("", None));
+        assert!(!is_screenshot("chrome.exe", None));
     }
 
     #[test]

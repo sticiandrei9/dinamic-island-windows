@@ -82,6 +82,15 @@ fn create_island(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
         .build()
 }
 
+static OWNER: OnceLock<isize> = OnceLock::new();
+
+/// Proprietarul ascuns al insulelor (scoate insula din Alt+Tab); apelat o dată, pe thread-ul principal.
+pub fn init_owner() {
+    if let Some(h) = platform::create_hidden_owner() {
+        let _ = OWNER.set(h);
+    }
+}
+
 fn placed() -> &'static Mutex<HashMap<String, (i32, i32, u32, u32)>> {
     static P: OnceLock<Mutex<HashMap<String, (i32, i32, u32, u32)>>> = OnceLock::new();
     P.get_or_init(Default::default)
@@ -119,6 +128,9 @@ pub fn sync_windows(app: &AppHandle) {
             // până raportează interfața dreptunghiul insulei, fereastra nu blochează click-urile
             let _ = win.set_ignore_cursor_events(true);
             platform::make_no_activate(&win);
+            if let Some(&owner) = OWNER.get() {
+                platform::set_owner(&win, owner);
+            }
             let _ = platform::show_keep_focus(&win);
         }
     }

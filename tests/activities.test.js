@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { layout, enqueue, advance, current, holdHead } from '../src/lib/activities.js';
+import { layout, enqueue, advance, current, holdHead, drop } from '../src/lib/activities.js';
 
 const media = { id: 'media', kind: 'media' };
 const timer = { id: 'timer', kind: 'timer' };
@@ -71,4 +71,16 @@ test('tranzitoria interactivă nu expiră cât e ținută (cursorul pe ea)', () 
   // una obișnuită nu e ținută
   const a = enqueue([], { kind: 'alert', duration: 3000 }, 0);
   assert.deepEqual(holdHead(a, 2900), a);
+});
+
+test('scoaterea celei afișate pornește următoarea (nu rămâne blocată)', () => {
+  let q = enqueue([], { kind: 'screenshot', duration: 6000 }, 0);
+  q = enqueue(q, { kind: 'notification', duration: 5000 }, 100);
+  q = drop(q, 'screenshot', 2000);
+  assert.equal(current(q, 2000)?.kind, 'notification');
+  assert.equal(current(advance(q, 7100), 7100), null); // și se termină la timp
+  // scoaterea uneia din spate nu atinge pe cea afișată
+  let r = enqueue([], { kind: 'alert', duration: 3000 }, 0);
+  r = enqueue(r, { kind: 'update', duration: 4000 }, 10);
+  assert.equal(drop(r, 'update', 500)[0].startedAt, 0);
 });

@@ -1,7 +1,7 @@
 import { Spring } from './lib/spring.js';
 import { islandPath, islandRect } from './lib/shape.js';
 import { sizeScale } from './lib/util.js';
-import { layout, enqueue, advance, current, holdHead } from './lib/activities.js';
+import { layout, enqueue, advance, current, holdHead, drop } from './lib/activities.js';
 import { ICONS, speakerIcon } from './icons.js';
 import { MediaView } from './media-view.js';
 import { AppsView } from './apps-view.js';
@@ -19,7 +19,7 @@ const TRANSIENT = {
   update: { w: 330, h: 36, r: 16 },
   volume: { w: 310, h: 36, r: 16 },
   notification: { w: 400, h: 78, r: 26 },
-  screenshot: { w: 430, h: 80, r: 26 },
+  screenshot: { w: 480, h: 80, r: 26 },
 };
 const EXPANDED_W = { home: 420, timer: 380, shelf: 440, mirror: 360 };
 const SPRING = { response: 0.5, damping: 0.72 };
@@ -65,6 +65,7 @@ export const island = {
   get settings() { return settings; },
   get expanded() { return expanded; },
   get shown() { return shown; },
+  lastScreenshotAt: 0,
   setActivity(id, activity) {
     if (activity) persistent.set(id, { id, ...activity });
     else persistent.delete(id);
@@ -75,7 +76,7 @@ export const island = {
     tickTransient();
   },
   dropTransients(kind) {
-    queue = queue.filter((a) => a.kind !== kind);
+    queue = drop(queue, kind, performance.now());
     tickTransient();
   },
   registerPane(id, def) {

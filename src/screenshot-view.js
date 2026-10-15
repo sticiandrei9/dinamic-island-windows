@@ -22,6 +22,7 @@ export function init(island) {
   document.getElementById('s-close').addEventListener('click', (e) => { e.stopPropagation(); island.dropTransients('screenshot'); });
 
   tauri.event.listen('screenshot', (e) => {
+    island.lastScreenshotAt = Date.now();
     island.dropTransients('screenshot'); // o captură nouă o înlocuiește pe cea veche
     island.pushTransient({ kind: 'screenshot', interactive: true, ...e.payload, duration: 6000 });
   });

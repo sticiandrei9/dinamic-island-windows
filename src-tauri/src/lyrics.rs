@@ -124,7 +124,18 @@ impl Cache {
 #[derive(Default)]
 pub struct LyricsCache(pub Mutex<Cache>);
 
-/// Ok(None) = LRCLIB nu are versuri; Err = rețeaua a eșuat.
+#[derive(Debug, PartialEq)]
+pub enum Http {
+    NotFound,
+    Retry,
+}
+
+/// Un răspuns HTTP de eroare: „nu există” sau „încearcă din nou” (limită de cereri, server căzut).
+pub fn http_outcome(code: u16) -> Http {
+    if code == 429 || code >= 500 { Http::Retry } else { Http::NotFound }
+}
+
+/// Ok(None) = LRCLIB nu are versuri; Err = rețeaua sau serverul au eșuat (nu se memorează).
 fn fetch(t: &Track) -> Result<Option<Vec<Line>>, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(8))
@@ -133,11 +144,20 @@ fn fetch(t: &Track) -> Result<Option<Vec<Line>>, String> {
             env!("CARGO_PKG_VERSION")
         ))
         .build();
-    // un răspuns HTTP de eroare (404 = piesă necunoscută) e „fără versuri”; doar lipsa rețelei e eroare
-    let get = |url: &str| match agent.get(url).call() {
-        Ok(r) => Ok(Some(r)),
-        Err(ureq::Error::Status(..)) => Ok(None),
-        Err(e) => Err(e.to_string()),
+    // 404 = piesă necunoscută („fără versuri”); 429 / 5xx = serverul refuză acum: reîncercăm o dată, apoi eroare
+    let get = |url: &str| {
+        for attempt in 0..2 {
+            match agent.get(url).call() {
+                Ok(r) => return Ok(Some(r)),
+                Err(ureq::Error::Status(code, _)) => match http_outcome(code) {
+                    Http::NotFound => return Ok(None),
+                    Http::Retry if attempt == 0 => std::thread::sleep(Duration::from_millis(1500)),
+                    Http::Retry => return Err(format!("LRCLIB: HTTP {code}")),
+                },
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        unreachable!()
     };
     let direct = get(&get_url(t))?.and_then(|r| r.into_json::<Found>().ok());
     if let Some(lines) = direct.and_then(|f| f.synced).map(|s| parse_lrc(&s)).filter(|l| usable(l)) {
@@ -240,6 +260,14 @@ mod tests {
 [00:03.00]c".into()) },
         ];
         assert_eq!(pick_result(&results, 213.0).map(|r| r.duration), Some(213.0));
+    }
+
+    #[test]
+    fn raspunsurile_http_de_eroare() {
+        assert_eq!(http_outcome(404), Http::NotFound); // piesă necunoscută: „fără versuri”
+        assert_eq!(http_outcome(400), Http::NotFound);
+        assert_eq!(http_outcome(429), Http::Retry); // prea multe cereri: nu e „fără versuri”
+        assert_eq!(http_outcome(503), Http::Retry);
     }
 
     #[test]

@@ -17,8 +17,8 @@ export function init(island) {
     island.refresh();
   }
 
-  function load(info) {
-    const id = ++request;
+  function load(info, retry = false) {
+    const id = retry ? request : ++request;
     lines = null;
     shown = -2;
     show(false);
@@ -32,7 +32,8 @@ export function init(island) {
         render(true);
         show(true);
       })
-      .catch(() => {});
+      // rețea sau LRCLIB ocupat: încă o încercare peste 15 s, dacă piesa e aceeași
+      .catch(() => { if (!retry) setTimeout(() => id === request && load(info, true), 15000); });
   }
 
   function render(force) {

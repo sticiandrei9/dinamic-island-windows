@@ -17,10 +17,12 @@ A MacBook-notch-style island at the top center of your screen. It shows what's p
 - **Volume and brightness** shown in the island. On Windows 11 the system volume pop-up stays visible too.
 - **Windows notifications** mirrored in the island (read from the screen; some apps may be missed).
 - **Privacy dots:** orange when an app uses the microphone, green for the camera.
+- **Calls:** while an app uses the microphone (Teams, Zoom, Discord, Meet…), the island shows the app and the call duration, with a button that mutes the Windows microphone.
+- **Screenshots:** after Win+Shift+S a thumbnail appears in the island with Save and To shelf (if Snipping Tool already saved the file, that file is used).
 - **File shelf:** drag files onto the island to keep them at hand, then drag them out into any app.
 - **Mirror:** a quick look at your webcam before a call.
 - **Open apps:** icons of your open windows; click one to bring it to the front.
-- **Settings:** turn each module on or off, expand on hover or click, pick the monitor (or all monitors) and the size.
+- **Settings:** turn each module on or off, expand on hover or click, pick the monitor (or all monitors), the size and the language (English, Română, Русский; automatic follows Windows).
 - **macOS-like motion:** spring animations with a slight overshoot; content fades in with blur and scale.
 - **Stays out of the way:** clicks pass through the area around the island, and it hides while a video or game runs full screen.
 - **Updates:** downloaded automatically from GitHub Releases; you get a notification and apply them from the tray (or the island). If you don't, they install at the next start.
@@ -73,10 +75,12 @@ O insulă în stilul notch-ului de MacBook, sus pe centrul ecranului. Din ea vez
 - **Volum și luminozitate** afișate în insulă. Pe Windows 11 rămâne vizibil și pop-up-ul de volum al sistemului.
 - **Notificările Windows** apar și în insulă (citite de pe ecran; unele aplicații pot fi ratate).
 - **Puncte de confidențialitate:** portocaliu când o aplicație folosește microfonul, verde pentru cameră.
+- **Apeluri:** cât o aplicație folosește microfonul (Teams, Zoom, Discord, Meet…), insula arată aplicația și durata apelului, cu un buton care oprește microfonul Windows.
+- **Capturi de ecran:** după Win+Shift+S apare în insulă o miniatură cu Salvează și Pe raft (dacă Instrumentul de decupare a salvat deja fișierul, se folosește acela).
 - **Raft de fișiere:** tragi fișiere pe insulă ca să le ai la îndemână, apoi le tragi de acolo în orice aplicație.
 - **Oglindă:** te vezi rapid în camera web înainte de un apel.
 - **Aplicații deschise:** iconițele ferestrelor deschise; un click aduce aplicația în față.
-- **Setări:** pornești sau oprești fiecare modul, alegi extinderea la hover sau la click, monitorul (sau toate) și mărimea.
+- **Setări:** pornești sau oprești fiecare modul, alegi extinderea la hover sau la click, monitorul (sau toate), mărimea și limba (Română, English, Русский; „Automat” urmează limba Windows).
 - **Animații ca pe macOS:** spring cu ușor overshoot; conținutul apare cu blur, fade și scale.
 - **Discretă:** click-urile trec prin zona din jurul insulei, iar insula se ascunde când un video sau un joc rulează pe tot ecranul.
 - **Actualizări:** se descarcă singure din GitHub Releases; primești o notificare și le aplici din tray (sau din insulă). Dacă nu apeși, se instalează la următoarea pornire.
@@ -123,16 +127,18 @@ Update-urile sunt acceptate doar dacă sunt semnate cu cheia privată din `%USER
 ### Возможности
 
 - **Медиа:** Spotify, YouTube (Chrome/Edge/Firefox), VLC, Медиаплеер и любое приложение, которое передаёт данные в Windows. Обложка, название, исполнитель, полоса прогресса, которую можно перетаскивать, и кнопки ⏮ ⏯ ⏭. Клик по обложке или названию выводит играющее приложение на передний план.
-- **Синхронизированные тексты песен** с [LRCLIB](https://lrclib.net), строка за строкой. Название и исполнитель каждой песни (включая названия видео YouTube) отправляются на lrclib.net; отключите модуль «Versuri», если не хотите этого.
+- **Синхронизированные тексты песен** с [LRCLIB](https://lrclib.net), строка за строкой. Название и исполнитель каждой песни (включая названия видео YouTube) отправляются на lrclib.net; отключите модуль «Тексты песен», если не хотите этого.
 - **Активности как на iPhone:** таймер и секундомер; когда одновременно идут две вещи (например, таймер и музыка), вторая показывается маленьким пузырьком рядом с островком.
 - **Оповещения:** подключение/отключение зарядки, низкий заряд батареи, подключение Bluetooth-наушников и устройств (с уровнем заряда).
 - **Громкость и яркость** отображаются в островке. В Windows 11 системное окно громкости тоже остаётся видимым.
 - **Уведомления Windows** дублируются в островке (считываются с экрана; некоторые приложения могут быть пропущены).
 - **Индикаторы приватности:** оранжевая точка — приложение использует микрофон, зелёная — камеру.
+- **Звонки:** пока приложение использует микрофон (Teams, Zoom, Discord, Meet…), островок показывает приложение и длительность звонка, с кнопкой, которая выключает микрофон Windows.
+- **Снимки экрана:** после Win+Shift+S в островке появляется миниатюра с кнопками «Сохранить» и «На полку» (если «Ножницы» уже сохранили файл, используется он).
 - **Полка для файлов:** перетащите файлы на островок, чтобы держать их под рукой, а потом перетащите их в любое приложение.
 - **Зеркало:** быстро взглянуть на себя через веб-камеру перед звонком.
 - **Открытые приложения:** значки открытых окон; по клику окно выводится на передний план.
-- **Настройки:** включение и выключение каждого модуля, раскрытие по наведению или по клику, выбор монитора (или всех) и размера.
+- **Настройки:** включение и выключение каждого модуля, раскрытие по наведению или по клику, выбор монитора (или всех), размера и языка (Русский, English, Română; «Автоматически» — как в Windows).
 - **Анимации как в macOS:** пружинные анимации с лёгким «перелётом»; содержимое появляется с размытием, затуханием и масштабированием.
 - **Не мешает:** клики проходят сквозь область вокруг островка, а при полноэкранном видео или игре он скрывается.
 - **Обновления:** скачиваются автоматически из GitHub Releases; вы получаете уведомление и применяете их из трея (или из островка). Если не нажать, они установятся при следующем запуске.

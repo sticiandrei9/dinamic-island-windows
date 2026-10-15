@@ -18,7 +18,8 @@ pub fn ics_url(setting: &str) -> Option<String> {
 }
 
 const MAX_BYTES: u64 = 5 * 1024 * 1024;
-const FRESH: Duration = Duration::from_secs(10 * 60);
+// toate insulele și Setările împart o descărcare; scurt, ca un eveniment adăugat cu puțin înainte să apară la timp
+const FRESH: Duration = Duration::from_secs(150);
 
 struct Cached {
     url: String,
@@ -28,7 +29,7 @@ struct Cached {
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
-/// Calendarul iCal (text), descărcat cel mult o dată la 10 minute pentru toate insulele.
+/// Calendarul iCal (text), descărcat cel mult o dată la 2,5 minute pentru toate insulele.
 /// None = nu e setat niciun link.
 #[tauri::command]
 pub async fn calendar_fetch(app: AppHandle) -> Result<Option<String>, String> {
@@ -78,5 +79,19 @@ mod tests {
         assert_eq!(ics_url(""), None);
         assert_eq!(ics_url("http://192.168.0.1/a.ics"), None);
         assert_eq!(ics_url("file:///C:/a.ics"), None);
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// Manual: descarcă linkul din DI_TEST_ICS_URL ca aplicația (fără să-l afișeze).
+    #[test]
+    #[ignore]
+    fn descarca_linkul_real() {
+        let url = super::ics_url(&std::env::var("DI_TEST_ICS_URL").unwrap()).expect("link invalid");
+        match ureq::get(&url).call() {
+            Ok(r) => println!("status {} , {} bytes", r.status(), r.into_string().unwrap().len()),
+            Err(e) => println!("eroare: {}", match e { ureq::Error::Status(c, _) => format!("HTTP {c}"), ureq::Error::Transport(t) => t.kind().to_string() }),
+        }
     }
 }

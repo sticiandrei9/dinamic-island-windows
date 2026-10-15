@@ -48,7 +48,8 @@ export function init(island) {
     island.refresh();
   }
 
-  setInterval(load, 5 * 60_000);
+  setInterval(load, 3 * 60_000);
+  window.addEventListener('home-show', () => enabled && load()); // descărcarea e în cache: ieftin
   setInterval(tick, 15_000);
   window.addEventListener('island-settings', (e) => {
     const on = e.detail.modules.calendar !== false && !!e.detail.calendar_url?.trim();

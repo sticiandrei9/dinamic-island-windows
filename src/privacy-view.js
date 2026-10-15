@@ -11,7 +11,8 @@ export function init(island) {
   const micBtn = document.getElementById('c-mic');
   const callText = document.getElementById('c-call-text');
   let state = null;
-  let modules = { privacy: true, calls: true };
+  // setările pot fi sosite înainte de încărcarea modulului (evenimentul `island-settings` s-a pierdut)
+  let modules = island.settings?.modules ?? { privacy: true, calls: true };
   let ticker = 0;
 
   function part(color, label, apps) {
@@ -29,7 +30,11 @@ export function init(island) {
     render();
     invoke('mic_set_mute', { muted })
       .then((m) => { state = { ...state, mic_muted: m }; render(); })
-      .catch(() => island.pushTransient({ kind: 'alert', icon: 'mic', title: t('call.failed'), color: 'var(--red)', duration: 2500 }));
+      .catch(() => {
+        // starea reală nu s-a schimbat, deci Rust nu retrimite nimic: o cerem, ca pastila să nu mintă
+        invoke('privacy_current').then((p) => { state = p; render(); }).catch(() => {});
+        island.pushTransient({ kind: 'alert', icon: 'mic', title: t('call.failed'), color: 'var(--red)', duration: 2500 });
+      });
   }
 
   function callTick() {

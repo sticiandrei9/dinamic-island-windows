@@ -18,7 +18,8 @@ pub fn is_capture_tool(exe: &str) -> bool {
 /// O imagine nouă în clipboard e o captură de ecran dacă a pus-o un instrument de captură sau dacă
 /// fereastra de selecție a unuia a fost în prim-plan cu cel mult 10 s înainte.
 pub fn is_screenshot(owner_exe: &str, tool_seen_ms_ago: Option<u64>) -> bool {
-    is_capture_tool(owner_exe) || tool_seen_ms_ago.is_some_and(|ms| ms <= 10_000)
+    // Snipping Tool golește proprietarul; un proprietar cunoscut (browser, Paint) înseamnă altă sursă
+    is_capture_tool(owner_exe) || (owner_exe.is_empty() && tool_seen_ms_ago.is_some_and(|ms| ms <= 10_000))
 }
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
@@ -397,6 +398,8 @@ mod tests {
         assert!(!is_screenshot("", Some(20_000)));
         assert!(!is_screenshot("", None));
         assert!(!is_screenshot("chrome.exe", None));
+        // captură anulată (Esc), apoi „Copy image” în browser: proprietarul e browserul, nu e captură
+        assert!(!is_screenshot("chrome.exe", Some(1_500)));
     }
 
     #[test]

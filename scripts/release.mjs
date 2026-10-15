@@ -25,6 +25,10 @@ function fail(stage, err) {
 if (!localUrl && execSync('git status --porcelain').toString().trim()) {
   throw new Error('working tree-ul nu e curat; fă commit întâi');
 }
+// --local readuce la final fișierele de versiune cu git checkout: modificările necomise din ele s-ar pierde
+if (localUrl && execFileSync('git', ['status', '--porcelain', '--', ...VERSION_FILES, 'src-tauri/Cargo.lock']).toString().trim()) {
+  throw new Error('fișierele de versiune au modificări necomise; fă commit întâi (--local le readuce la final)');
+}
 if (!localUrl) checkBranch(execSync('git rev-parse --abbrev-ref HEAD').toString().trim());
 const current = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')).version;
 validateVersion(version, current);

@@ -144,17 +144,34 @@ pub fn shelf_clear(app: AppHandle) -> Result<(), String> {
 pub fn shelf_copy_path(path: String) -> Result<(), String> {
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     let text: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
     unsafe {
-        OpenClipboard(None).map_err(|e| e.to_string())?;
+        // alt program (un manager de clipboard, RDP) îl poate ține deschis o clipă
+        let mut opened = OpenClipboard(None);
+        for _ in 0..10 {
+            if opened.is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            opened = OpenClipboard(None);
+        }
+        opened.map_err(|e| e.to_string())?;
         let result = (|| {
             EmptyClipboard()?;
-            let mem = GlobalAlloc(GMEM_MOVEABLE, text.len() * 2)?;
+            let mem: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, text.len() * 2)?;
             let dst = GlobalLock(mem) as *mut u16;
+            if dst.is_null() {
+                let _ = GlobalFree(mem);
+                return Err(windows::core::Error::from_win32());
+            }
             std::ptr::copy_nonoverlapping(text.as_ptr(), dst, text.len());
             let _ = GlobalUnlock(mem);
-            SetClipboardData(13, HANDLE(mem.0)).map(|_| ()) // CF_UNICODETEXT; clipboard-ul preia memoria
+            // CF_UNICODETEXT; după succes memoria e a clipboard-ului, altfel o eliberăm noi
+            SetClipboardData(13, HANDLE(mem.0)).map(|_| ()).inspect_err(|_| {
+                let _ = GlobalFree(mem);
+            })
         })();
         let _ = CloseClipboard();
         result.map_err(|e| e.to_string())

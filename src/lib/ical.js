@@ -69,10 +69,14 @@ function parseEvents(text) {
   const lines = text.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
   const events = [];
   let ev = null;
+  let nested = 0; // VALARM etc. din eveniment: proprietățile lor nu sunt ale evenimentului
   for (const line of lines) {
-    if (line === 'BEGIN:VEVENT') { ev = { exdates: [] }; continue; }
+    if (line === 'BEGIN:VEVENT') { ev = { exdates: [] }; nested = 0; continue; }
     if (line === 'END:VEVENT') { if (ev) events.push(ev); ev = null; continue; }
     if (!ev) continue;
+    if (line.startsWith('BEGIN:')) { nested++; continue; }
+    if (line.startsWith('END:')) { nested = Math.max(0, nested - 1); continue; }
+    if (nested) continue;
     const { name, params, value } = parseLine(line);
     if (name === 'SUMMARY') ev.title = unescape(value);
     else if (name === 'UID') ev.uid = value;
@@ -108,9 +112,11 @@ function periodDays(base, freq, k, interval, rule) {
     return !byday || byday.includes(WEEKDAYS[new Date(ms).getUTCDay()]) ? [ms] : [];
   }
   if (freq === 'WEEKLY') {
-    const monday = Date.UTC(y, mo - 1, d) - ((new Date(Date.UTC(y, mo - 1, d)).getUTCDay() + 6) % 7) * DAY + k * interval * 7 * DAY;
+    // săptămâna începe în ziua WKST (implicit luni; Google pune adesea duminică)
+    const ws = Math.max(0, WEEKDAYS.indexOf(rule.WKST ?? 'MO'));
+    const weekStart = Date.UTC(y, mo - 1, d) - ((new Date(Date.UTC(y, mo - 1, d)).getUTCDay() - ws + 7) % 7) * DAY + k * interval * 7 * DAY;
     const days = byday ?? [WEEKDAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()]];
-    return days.map((w) => monday + ((WEEKDAYS.indexOf(w.slice(-2)) + 6) % 7) * DAY + time).sort((a, b) => a - b);
+    return days.map((w) => weekStart + ((WEEKDAYS.indexOf(w.slice(-2)) - ws + 7) % 7) * DAY + time).sort((a, b) => a - b);
   }
   if (freq === 'MONTHLY' || freq === 'YEARLY') {
     const step = freq === 'MONTHLY' ? k * interval : k * interval * 12;
@@ -128,8 +134,9 @@ function periodDays(base, freq, k, interval, rule) {
         return pick.filter(Boolean).map((day) => Date.UTC(yy, mm, day) + time);
       }).sort((a, b) => a - b);
     }
-    const day = rule.BYMONTHDAY ? +rule.BYMONTHDAY : d;
-    return day <= inMonth ? [Date.UTC(yy, mm, day) + time] : [];
+    // „1,15”; „-1” = ultima zi a lunii
+    const days = rule.BYMONTHDAY ? rule.BYMONTHDAY.split(',').map(Number).map((n) => (n < 0 ? inMonth + n + 1 : n)) : [d];
+    return days.filter((day) => day >= 1 && day <= inMonth).sort((a, b) => a - b).map((day) => Date.UTC(yy, mm, day) + time);
   }
   return [];
 }
@@ -144,10 +151,21 @@ function occurrences(ev, duration, from, to) {
   const interval = Math.max(1, +(rule.INTERVAL ?? 1));
   const count = rule.COUNT ? +rule.COUNT : Infinity;
   const untilDate = rule.UNTIL ? parseDate(rule.UNTIL, {}) : null;
-  const until = untilDate ? toEpoch(untilDate.wall, untilDate.tz ?? ev.start.tz) : Infinity;
+  // UNTIL ca dată (fără oră) include toată ziua
+  const until = untilDate ? toEpoch(untilDate.wall, untilDate.tz ?? ev.start.tz) + (untilDate.allDay ? DAY - 1 : 0) : Infinity;
   const out = [];
   let n = 0;
-  for (let k = 0; k < 20_000; k++) {
+  // fără COUNT nu trebuie numărate aparițiile vechi: sărim direct aproape de `from`
+  let k = 0;
+  if (count === Infinity && from > start) {
+    const [sy, sm] = ev.start.wall;
+    const f = new Date(from);
+    const months = (f.getUTCFullYear() - sy) * 12 + f.getUTCMonth() - (sm - 1);
+    const period = { DAILY: interval * DAY, WEEKLY: interval * 7 * DAY }[freq];
+    k = period ? Math.floor((from - start - duration) / period) - 2 : Math.floor(months / (freq === 'YEARLY' ? 12 * interval : interval)) - 2;
+    k = Math.max(0, k);
+  }
+  for (const end = k + 20_000; k < end; k++) {
     const days = periodDays(ev.start.wall, freq, k, interval, rule);
     for (const w of days) {
       if (w < wallMs(ev.start.wall)) continue;

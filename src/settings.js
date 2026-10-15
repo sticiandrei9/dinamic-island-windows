@@ -61,7 +61,8 @@ function comboFrom(e) {
   const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : /^Digit\d$/.test(e.code) ? e.code.slice(5) : /^F\d{1,2}$/.test(e.code) ? e.code : e.code === 'Space' ? 'Space' : null;
   if (!key) return null;
   const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Win'].filter(Boolean);
-  return mods.length ? [...mods, key].join('+') : null;
+  // doar Shift nu ajunge: Shift+A ar fura litera A mare din tot ce scrii
+  return mods.some((m) => m !== 'Shift') ? [...mods, key].join('+') : null;
 }
 async function showHotkeyError() {
   const busy = await invoke('hotkey_error').catch(() => null);
@@ -89,7 +90,25 @@ window.addEventListener('keydown', (e) => {
 });
 document.getElementById('hotkey-clear').addEventListener('click', () => { settings.hotkey = ''; renderControls(); save(); });
 document.getElementById('shelf-days').addEventListener('change', (e) => { settings.shelf_days = Number(e.target.value); save(); });
-document.getElementById('calendar-url').addEventListener('change', (e) => { settings.calendar_url = e.target.value.trim(); save(); });
+document.getElementById('calendar-url').addEventListener('change', async (e) => {
+  settings.calendar_url = e.target.value.trim();
+  await invoke('set_settings', { settings }).catch((err) => console.error(err));
+  checkCalendar();
+});
+
+// linkul calendarului: îl citim o dată, ca să afli pe loc dacă merge
+async function checkCalendar() {
+  const hint = document.getElementById('calendar-hint');
+  hint.classList.remove('error');
+  if (!settings.calendar_url) { hint.textContent = t('settings.calendarHint'); return; }
+  try {
+    await invoke('calendar_fetch');
+    hint.textContent = t('settings.calendarOk');
+  } catch (err) {
+    hint.textContent = t('settings.calendarError', { v: err });
+    hint.classList.add('error');
+  }
+}
 
 function renderShelfDays() {
   document.getElementById('shelf-days').replaceChildren(...SHELF_DAYS.map((n) => Object.assign(document.createElement('option'), { value: String(n), textContent: n ? t('settings.afterDays', { n }) : t('settings.never') })));
@@ -159,5 +178,6 @@ setInterval(renderUpdate, 30_000); // „verificat acum X minute” rămâne act
   await renderMonitors();
   renderControls();
   showHotkeyError();
+  checkCalendar();
   renderUpdate();
 })();

@@ -118,7 +118,8 @@ pub fn net_transition(prev: Option<&Net>, cur: &Net) -> Vec<Alert> {
     let mut out = Vec::new();
     if prev.online && !cur.online {
         out.push(alert("wifiOff", &t("net.offline"), String::new(), "var(--red)", None));
-    } else if cur.online && (!prev.online || prev.name != cur.name) {
+    } else if cur.online && (!prev.online || prev.name != cur.name) && prev.vpn == cur.vpn {
+        // (un VPN care preia tot traficul schimbă și profilul de internet: anunțăm doar VPN-ul)
         out.push(alert("wifi", &t("net.online"), cur.name.clone(), "var(--green)", None));
     }
     match (&prev.vpn, &cur.vpn) {
@@ -129,8 +130,9 @@ pub fn net_transition(prev: Option<&Net>, cur: &Net) -> Vec<Alert> {
     out
 }
 
-/// Conexiunea la internet și VPN-ul activ. VPN = o conexiune pe un adaptor virtual/tunel
-/// (PPP 23, virtual 53, tunel 131): WireGuard, Tailscale, OpenVPN, VPN-ul Windows.
+/// Conexiunea la internet și VPN-ul activ. VPN = o conexiune pe un adaptor virtual/tunel (53, 131):
+/// WireGuard, Tailscale, OpenVPN (Wintun/DCO). PPP (23) nu, fiindcă e și PPPoE-ul multor furnizori de internet.
+/// shortcut: VPN-urile Windows pe PPP și OpenVPN pe TAP nu sunt văzute; de adăugat după nume, dacă e nevoie.
 fn read_net() -> windows::core::Result<Net> {
     let mut net = Net::default();
     if let Ok(p) = NetworkInformation::GetInternetConnectionProfile() {
@@ -140,7 +142,7 @@ fn read_net() -> windows::core::Result<Net> {
     for p in NetworkInformation::GetConnectionProfiles()? {
         let kind = p.NetworkAdapter().and_then(|a| a.IanaInterfaceType()).unwrap_or(0);
         let up = p.GetNetworkConnectivityLevel().is_ok_and(|l| l != NetworkConnectivityLevel::None);
-        if up && matches!(kind, 23 | 53 | 131) {
+        if up && matches!(kind, 53 | 131) {
             net.vpn = Some(p.ProfileName().map(|n| n.to_string()).unwrap_or_default());
             break;
         }
@@ -205,9 +207,15 @@ pub fn spawn(app: AppHandle) {
         let mut net_seen: Option<Net> = None;
         let mut bt_retry_at = std::time::Instant::now();
         let mut tick = 0u32;
+        let mut last = std::time::Instant::now();
         loop {
             std::thread::sleep(Duration::from_secs(2));
             tick += 1;
+            // după sleep/hibernare, Wi-Fi-ul revine în câteva secunde: fără „internet pierdut/revenit”
+            if last.elapsed() > Duration::from_secs(10) {
+                (net, net_seen) = (None, None);
+            }
+            last = std::time::Instant::now();
             let modules = app.state::<SettingsState>().get().modules;
             if !modules.network {
                 (net, net_seen) = (None, None);
@@ -312,6 +320,8 @@ mod tests {
         assert!(net_transition(Some(&wifi("Acasa")), &wifi("Acasa")).is_empty());
         let vpn = Net { vpn: Some("Tailscale".into()), ..wifi("Acasa") };
         let c = net_transition(Some(&wifi("Acasa")), &vpn);
+        // VPN complet: și profilul de internet se schimbă, dar anunțăm doar VPN-ul
+        assert_eq!(net_transition(Some(&wifi("Acasa")), &Net { name: "wg0".into(), ..vpn.clone() }).len(), 1);
         assert_eq!((c.len(), c[0].icon.as_str(), c[0].detail.as_str()), (1, "vpn", "Tailscale"));
         assert_eq!(net_transition(Some(&vpn), &wifi("Acasa"))[0].color, "var(--fg2)");
     }

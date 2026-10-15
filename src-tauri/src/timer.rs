@@ -177,12 +177,12 @@ pub fn alarm_path(system_root: Option<&str>) -> String {
     format!("{}\\Media\\Alarm01.wav", system_root.unwrap_or("C:\\Windows"))
 }
 
-/// Sunetul de alarmă Windows, de 3 ori, pe un thread separat.
-fn play_alarm() {
-    std::thread::spawn(|| {
+/// Sunetul de alarmă Windows, de `times` ori, pe un thread separat.
+fn play_alarm(times: usize) {
+    std::thread::spawn(move || {
         let root = std::env::var("SystemRoot").ok();
         let path: Vec<u16> = alarm_path(root.as_deref()).encode_utf16().chain(Some(0)).collect();
-        for _ in 0..3 {
+        for _ in 0..times {
             unsafe {
                 let _ = PlaySoundW(PCWSTR(path.as_ptr()), None, SND_FILENAME | SND_SYNC | SND_NODEFAULT);
             }
@@ -197,7 +197,7 @@ pub fn spawn(app: AppHandle) {
         loop {
             std::thread::sleep(Duration::from_millis(250));
             let now = now_ms();
-            let (done, clear) = {
+            let (done, clear, pomodoro) = {
                 let state = app.state::<ClockState>();
                 let mut c = state.0.lock().unwrap();
                 let done = c.tick(now);
@@ -205,13 +205,13 @@ pub fn spawn(app: AppHandle) {
                 if clear {
                     c.dismiss();
                 }
-                (done, clear)
+                (done, clear, c.pomodoro.is_some())
             };
             if done {
                 finished_at = Some(now);
                 // cu modulul Timer oprit nu se vede nimic, deci nici nu sună
                 if app.state::<crate::settings::SettingsState>().get().modules.timer {
-                    play_alarm();
+                    play_alarm(if pomodoro { 1 } else { 3 }); // Pomodoro: un singur semnal la fiecare etapă
                 }
             }
             if clear {

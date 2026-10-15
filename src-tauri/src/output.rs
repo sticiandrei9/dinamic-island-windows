@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use serde::Serialize;
 use windows::core::{interface, IUnknown, IUnknown_Vtbl, GUID, HRESULT, HSTRING, PCWSTR};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Media::Audio::{eCommunications, eConsole, eMultimedia, eRender, ERole, DEVICE_STATE_ACTIVE};
+use windows::Win32::Media::Audio::{eConsole, eMultimedia, eRender, ERole, DEVICE_STATE_ACTIVE};
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL, COINIT_APARTMENTTHREADED, STGM_READ};
 
 /// O ieșire audio (difuzoare, căști, monitor HDMI…).
@@ -67,14 +67,15 @@ pub async fn audio_outputs() -> Vec<Output> {
     tauri::async_runtime::spawn_blocking(list).await.unwrap_or_default()
 }
 
-/// Face ieșirea implicită pentru toate rolurile (aplicații, multimedia, apeluri), ca panoul de sunet.
+/// Face ieșirea implicită pentru aplicații și multimedia, ca „Implicit” din panoul de sunet; dispozitivul
+/// de comunicare (ales separat pentru Teams/Zoom) rămâne neatins.
 #[tauri::command]
 pub async fn audio_set_output(id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _com = crate::platform::ComGuard::new(COINIT_APARTMENTTHREADED);
         let policy: IPolicyConfig = unsafe { CoCreateInstance(&CLSID_POLICY_CONFIG, None, CLSCTX_ALL) }.map_err(|e| e.to_string())?;
         let id = HSTRING::from(id);
-        for role in [eConsole, eMultimedia, eCommunications] {
+        for role in [eConsole, eMultimedia] {
             unsafe { policy.SetDefaultEndpoint(PCWSTR(id.as_ptr()), role) }.ok().map_err(|e| e.to_string())?;
         }
         Ok(())

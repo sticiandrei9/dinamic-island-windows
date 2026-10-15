@@ -14,6 +14,7 @@ export function init(island) {
   document.getElementById('c-meet-icon').innerHTML = ICONS.calendar;
   const pillText = document.getElementById('c-meet-text');
   let text = null;
+  let expanded = []; // evenimentele următoarelor 48 h, calculate o dată la descărcare
   let url = '';
   let enabled = false;
 
@@ -21,13 +22,13 @@ export function init(island) {
     if (!enabled) return tick();
     // la o eroare de rețea rămâne calendarul descărcat ultima dată
     text = (await invoke('calendar_fetch').catch(() => text)) ?? null;
+    try { expanded = text ? upcoming(text, Date.now(), 48 * 3600_000) : []; } catch (e) { invoke('log_js', { msg: `calendar: ${e}` }); }
     tick();
   }
 
   function tick() {
     const now = Date.now();
-    let events = [];
-    try { events = enabled && text ? upcoming(text, now, 24 * 3600_000) : []; } catch (e) { invoke('log_js', { msg: `calendar: ${e}` }); }
+    const events = enabled ? expanded.filter((e) => e.end > now) : [];
     const midnight = new Date(now).setHours(24, 0, 0, 0);
 
     const today = events.find((e) => e.start < midnight);
@@ -56,6 +57,7 @@ export function init(island) {
     url = e.detail.calendar_url ?? '';
     if (!changed) return;
     text = null;
+    expanded = [];
     load();
   });
 }

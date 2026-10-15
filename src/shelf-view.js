@@ -98,7 +98,7 @@ export function init(island) {
       const reveal = el('button', '', t('shelf.reveal'));
       const copy = el('button', '', t('shelf.copyPath'));
       const remove = el('button', '', t('shelf.remove'));
-      copy.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_copy_path', { path: it.path }); });
+      copy.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_copy_path', { path: it.path }).catch((err) => invoke('log_js', { msg: `raft: copierea căii a eșuat: ${err}` })); });
       reveal.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_reveal', { path: it.path }); island.collapse(); });
       remove.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_remove_path', { path: it.path }); });
       menu.append(reveal, copy, remove);

@@ -53,9 +53,12 @@ pub async fn calendar_fetch(app: AppHandle) -> Result<Option<String>, String> {
                 log::warn!("calendar: descărcarea a eșuat: {msg}");
                 msg
             })?;
-            let mut text = String::new();
-            resp.into_reader().take(MAX_BYTES).read_to_string(&mut text).map_err(|e| e.to_string())?;
-            Ok(text)
+            let mut bytes = Vec::new();
+            resp.into_reader().take(MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_BYTES {
+                return Err("calendar > 5 MB".into());
+            }
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
         }
     })
     .await

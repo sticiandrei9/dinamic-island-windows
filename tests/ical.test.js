@@ -66,3 +66,36 @@ test('text invalid nu aruncă excepții', () => {
   assert.deepEqual(upcoming('nu e calendar', Date.now(), D), []);
   assert.deepEqual(upcoming(cal(['UID:x', 'SUMMARY:fără dată']), Date.now(), D), []);
 });
+
+test('alarmele (VALARM) nu schimbă titlul sau durata evenimentului', () => {
+  const text = cal(['UID:a', 'SUMMARY:Dentist', 'DTSTART:20261015T120000Z', 'DTEND:20261015T130000Z',
+    'BEGIN:VALARM', 'ACTION:EMAIL', 'SUMMARY:Alarm notification', 'TRIGGER:-P0DT0H30M0S', 'DURATION:PT5M', 'END:VALARM']);
+  const [e] = upcoming(text, Date.UTC(2026, 9, 15, 11), D);
+  assert.equal(e.title, 'Dentist');
+  assert.equal(e.end - e.start, H);
+});
+
+test('WKST=SU la repetarea din 2 în 2 săptămâni', () => {
+  // start marți 6 oct 2026; săptămânile încep duminica: (4–10 oct), (18–24 oct), (1–7 nov)
+  const text = cal(['UID:w', 'SUMMARY:X', 'DTSTART:20261006T100000Z', 'DTEND:20261006T110000Z', 'RRULE:FREQ=WEEKLY;WKST=SU;INTERVAL=2;BYDAY=SU,TU']);
+  assert.deepEqual(upcoming(text, Date.UTC(2026, 9, 1), 33 * D).map((e) => new Date(e.start).toISOString().slice(0, 10)),
+    ['2026-10-06', '2026-10-18', '2026-10-20', '2026-11-01']);
+});
+
+test('BYMONTHDAY negativ și cu listă, UNTIL ca dată (inclusiv)', () => {
+  const last = cal(['UID:l', 'SUMMARY:X', 'DTSTART:20260131T100000Z', 'DTEND:20260131T110000Z', 'RRULE:FREQ=MONTHLY;BYMONTHDAY=-1']);
+  assert.deepEqual(upcoming(last, Date.UTC(2026, 9, 1), 31 * D).map((e) => new Date(e.start).getUTCDate()), [31]);
+  const list = cal(['UID:m', 'SUMMARY:X', 'DTSTART:20260101T100000Z', 'DTEND:20260101T110000Z', 'RRULE:FREQ=MONTHLY;BYMONTHDAY=1,15']);
+  assert.deepEqual(upcoming(list, Date.UTC(2026, 9, 1), 30 * D).map((e) => new Date(e.start).getUTCDate()), [1, 15]);
+  const until = cal(['UID:u', 'SUMMARY:X', 'DTSTART:20261014T100000Z', 'DTEND:20261014T110000Z', 'RRULE:FREQ=DAILY;UNTIL=20261016']);
+  assert.deepEqual(upcoming(until, Date.UTC(2026, 9, 14), 10 * D).map((e) => new Date(e.start).getUTCDate()), [14, 15, 16]);
+});
+
+test('un calendar cu ani de istoric se citește repede', () => {
+  const evs = Array.from({ length: 200 }, (_, i) => [`UID:e${i}`, `SUMMARY:E${i}`, 'DTSTART;TZID=Europe/Bucharest:20160104T090000',
+    'DTEND;TZID=Europe/Bucharest:20160104T093000', 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR']);
+  const t0 = performance.now();
+  const out = upcoming(cal(...evs), Date.UTC(2026, 9, 15), D);
+  assert.equal(out.length, 200); // joi 15 oct, 9:00 București
+  assert.ok(performance.now() - t0 < 500, `prea lent: ${Math.round(performance.now() - t0)} ms`);
+});

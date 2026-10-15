@@ -13,8 +13,8 @@ const MOD_SHIFT: u32 = 0x4;
 const MOD_WIN: u32 = 0x8;
 const MOD_NOREPEAT: u32 = 0x4000;
 
-/// „Win+Shift+I” → (modificatori, cod de tastă). Cel puțin un modificator: o tastă singură
-/// ar fi furată din tot ce scrii.
+/// „Win+Shift+I” → (modificatori, cod de tastă). Cel puțin Ctrl, Alt sau Win: o tastă singură
+/// sau doar cu Shift (o literă mare) ar fi furată din tot ce scrii.
 pub fn parse(combo: &str) -> Option<(u32, u32)> {
     let (mut mods, mut vk) = (0, None);
     for part in combo.split('+').map(str::trim).filter(|p| !p.is_empty()) {
@@ -28,7 +28,7 @@ pub fn parse(combo: &str) -> Option<(u32, u32)> {
             k => vk = Some(0x6F + k.strip_prefix('f')?.parse::<u32>().ok().filter(|n| (1..=24).contains(n))?),
         }
     }
-    if mods == 0 { None } else { Some((mods | MOD_NOREPEAT, vk?)) }
+    if mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) == 0 { None } else { Some((mods | MOD_NOREPEAT, vk?)) }
 }
 
 struct Worker {
@@ -98,14 +98,18 @@ pub fn apply_and_report(combo: &str) {
     *LAST_ERROR.lock().unwrap() = (!ok).then(|| combo.to_string());
 }
 
-/// Deschide/strânge insula de pe monitorul cu cursorul.
+/// Deschide/strânge insula de pe monitorul cu cursorul. Doar Win32 aici: API-urile Tauri de monitor
+/// așteaptă thread-ul principal, care poate aștepta chiar acum după acest thread (`apply`).
 fn toggle(app: &AppHandle) {
-    let cursor = crate::platform::cursor_pos();
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MonitorFromRect, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
     let windows: Vec<_> = app.webview_windows().into_iter().filter(|(l, _)| l.starts_with("island-")).map(|(_, w)| w).collect();
+    let cursor_mon = crate::platform::cursor_pos().map(|(x, y)| unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) });
     let on_cursor = windows.iter().find(|w| {
-        let (Some((x, y)), Ok(Some(m))) = (cursor, w.current_monitor()) else { return false };
-        let (p, s) = (m.position(), m.size());
-        x >= p.x && x < p.x + s.width as i32 && y >= p.y && y < p.y + s.height as i32
+        let (Some(mon), Some(hwnd)) = (cursor_mon, crate::platform::hwnd_of(w)) else { return false };
+        let mut r = RECT::default();
+        unsafe { GetWindowRect(hwnd, &mut r).is_ok() && MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST) == mon }
     });
     if let Some(w) = on_cursor.or(windows.first()) {
         let _ = app.emit_to(w.label(), "island-toggle", ());
@@ -128,6 +132,7 @@ mod tests {
     fn combinatii_invalide() {
         assert_eq!(parse(""), None);
         assert_eq!(parse("I"), None); // fără modificator
+        assert_eq!(parse("Shift+A"), None); // ar fura litera A mare
         assert_eq!(parse("Ctrl+Shift"), None); // fără tastă
         assert_eq!(parse("Ctrl+F25"), None);
         assert_eq!(parse("Ctrl+Esc"), None);

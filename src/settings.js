@@ -4,7 +4,8 @@ import { t, setLang, applyStatic } from './lib/i18n.js';
 const tauri = window.__TAURI__;
 const invoke = tauri.core.invoke;
 
-const MODULES = ['media', 'lyrics', 'apps', 'timer', 'privacy', 'calls', 'alerts', 'volume', 'notifications', 'screenshots', 'shelf', 'mirror'];
+const MODULES = ['media', 'lyrics', 'apps', 'output', 'timer', 'calendar', 'privacy', 'calls', 'alerts', 'network', 'keyboard', 'volume', 'notifications', 'screenshots', 'shelf', 'mirror'];
+const SHELF_DAYS = [0, 1, 7, 30];
 
 let settings = null;
 let updateState = { kind: 'idle' };
@@ -46,6 +47,52 @@ function renderControls() {
   document.querySelectorAll('input[data-key]').forEach((i) => { i.checked = !!settings[i.dataset.key]; });
   document.getElementById('monitor').value = settings.monitor;
   document.getElementById('language').value = settings.language ?? 'auto';
+  document.getElementById('shelf-days').value = String(settings.shelf_days ?? 0);
+  const cal = document.getElementById('calendar-url');
+  if (document.activeElement !== cal) cal.value = settings.calendar_url ?? '';
+  if (!recording) document.getElementById('hotkey').textContent = settings.hotkey || t('settings.hotkeyNone');
+  document.getElementById('hotkey-clear').hidden = !settings.hotkey;
+}
+
+// scurtătura: butonul ascultă următoarea combinație (cel puțin un modificator + o tastă)
+let recording = false;
+
+function comboFrom(e) {
+  const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : /^Digit\d$/.test(e.code) ? e.code.slice(5) : /^F\d{1,2}$/.test(e.code) ? e.code : e.code === 'Space' ? 'Space' : null;
+  if (!key) return null;
+  const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Win'].filter(Boolean);
+  return mods.length ? [...mods, key].join('+') : null;
+}
+async function showHotkeyError() {
+  const busy = await invoke('hotkey_error').catch(() => null);
+  const hint = document.getElementById('hotkey-hint');
+  hint.textContent = busy && busy === settings.hotkey ? t('settings.hotkeyBusy') : t('settings.hotkeyHint');
+  hint.classList.toggle('error', !!busy && busy === settings.hotkey);
+}
+document.getElementById('hotkey').addEventListener('click', (e) => {
+  recording = true;
+  e.target.classList.add('recording');
+  e.target.textContent = t('settings.hotkeyPress');
+});
+window.addEventListener('keydown', (e) => {
+  if (!recording) return;
+  e.preventDefault();
+  const btn = document.getElementById('hotkey');
+  if (e.key === 'Escape') { recording = false; btn.classList.remove('recording'); renderControls(); return; }
+  const combo = comboFrom(e);
+  if (!combo) return; // doar modificatori până acum
+  recording = false;
+  btn.classList.remove('recording');
+  settings.hotkey = combo;
+  renderControls();
+  save();
+});
+document.getElementById('hotkey-clear').addEventListener('click', () => { settings.hotkey = ''; renderControls(); save(); });
+document.getElementById('shelf-days').addEventListener('change', (e) => { settings.shelf_days = Number(e.target.value); save(); });
+document.getElementById('calendar-url').addEventListener('change', (e) => { settings.calendar_url = e.target.value.trim(); save(); });
+
+function renderShelfDays() {
+  document.getElementById('shelf-days').replaceChildren(...SHELF_DAYS.map((n) => Object.assign(document.createElement('option'), { value: String(n), textContent: n ? t('settings.afterDays', { n }) : t('settings.never') })));
 }
 
 // limba: textele statice, cele generate și titlul ferestrei
@@ -94,9 +141,10 @@ document.getElementById('open-logs').addEventListener('click', () => invoke('ope
 tauri.event.listen('settings-changed', (e) => {
   const langChanged = e.payload.resolved_language !== settings?.resolved_language;
   settings = e.payload;
-  if (langChanged) { applyLanguage(); renderMonitors(); renderUpdate(); }
+  if (langChanged) { applyLanguage(); renderMonitors(); renderUpdate(); renderShelfDays(); }
   renderModules();
   renderControls();
+  showHotkeyError();
 });
 tauri.event.listen('update-state', (e) => { updateState = e.payload; renderUpdate(); });
 setInterval(renderUpdate, 30_000); // „verificat acum X minute” rămâne actual
@@ -107,7 +155,9 @@ setInterval(renderUpdate, 30_000); // „verificat acum X minute” rămâne act
   version = await tauri.app.getVersion();
   applyLanguage();
   renderModules();
+  renderShelfDays();
   await renderMonitors();
   renderControls();
+  showHotkeyError();
   renderUpdate();
 })();

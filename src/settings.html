@@ -28,6 +28,17 @@
         </div>
       </div>
       <div class="row">
+        <div class="label"><span data-i18n="settings.hotkey"></span><small id="hotkey-hint" data-i18n="settings.hotkeyHint"></small></div>
+        <div class="buttons">
+          <button class="btn" id="hotkey"></button>
+          <button class="btn" id="hotkey-clear" data-i18n="settings.hotkeyClear"></button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="label"><span data-i18n="settings.shelfDays"></span><small data-i18n="settings.shelfDaysHint"></small></div>
+        <select id="shelf-days"></select>
+      </div>
+      <div class="row">
         <div class="label" data-i18n="settings.language"></div>
         <select id="language">
           <option value="auto" data-i18n="settings.langAuto"></option>
@@ -35,6 +46,14 @@
           <option value="en">English</option>
           <option value="ru">Русский</option>
         </select>
+      </div>
+    </section>
+
+    <h2 data-i18n="settings.calendar"></h2>
+    <section class="group">
+      <div class="row col">
+        <div class="label"><span data-i18n="settings.calendarLink"></span><small data-i18n="settings.calendarHint"></small></div>
+        <input type="password" id="calendar-url" spellcheck="false" autocomplete="off" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
       </div>
     </section>
 

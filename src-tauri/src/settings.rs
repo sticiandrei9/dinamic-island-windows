@@ -30,6 +30,10 @@ pub struct Modules {
     pub screenshots: bool,
     pub shelf: bool,
     pub mirror: bool,
+    pub keyboard: bool,
+    pub network: bool,
+    pub output: bool,
+    pub calendar: bool,
 }
 
 impl Default for Modules {
@@ -37,6 +41,7 @@ impl Default for Modules {
         Self {
             media: true, lyrics: true, apps: true, timer: true, privacy: true,
             alerts: true, volume: true, notifications: true, calls: true, screenshots: true, shelf: true, mirror: true,
+            keyboard: true, network: true, output: true, calendar: true,
         }
     }
 }
@@ -89,6 +94,15 @@ pub struct Settings {
     /// "auto" (după limba Windows), "ro", "en" sau "ru"
     #[serde(deserialize_with = "lenient")]
     pub language: String,
+    /// scurtătura care deschide insula, de ex. "Win+Shift+I"; goală = niciuna
+    #[serde(deserialize_with = "lenient")]
+    pub hotkey: String,
+    /// fișierele de pe raft mai vechi de atâtea zile ies singure; 0 = niciodată
+    #[serde(deserialize_with = "lenient")]
+    pub shelf_days: u32,
+    /// linkul secret iCal (Google Calendar); gol = fără calendar
+    #[serde(deserialize_with = "lenient")]
+    pub calendar_url: String,
 }
 
 impl Default for Settings {
@@ -102,6 +116,9 @@ impl Default for Settings {
             auto_update: true,
             mirror_camera: None,
             language: "auto".into(),
+            hotkey: String::new(),
+            shelf_days: 0,
+            calendar_url: String::new(),
         }
     }
 }
@@ -177,6 +194,9 @@ pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, mut sett
     settings.save(&state.path).map_err(|e| e.to_string())?;
     *state.current.lock().unwrap() = settings.clone();
     crate::tray::refresh_autostart_item(&app, settings.autostart);
+    if previous.hotkey != settings.hotkey {
+        crate::hotkey::apply_and_report(&settings.hotkey);
+    }
     if previous.language != settings.language {
         crate::i18n::set_current(settings.lang());
         crate::tray::refresh_texts(&app);
@@ -224,7 +244,9 @@ mod tests {
         assert_eq!(s.monitor, "primary");
         assert_eq!(s.size, Size::Normal);
         assert!(s.autostart && s.auto_update);
-        assert!(m.calls && m.screenshots);
+        assert!(m.calls && m.screenshots && m.keyboard && m.network && m.output && m.calendar);
+        assert!(s.hotkey.is_empty() && s.calendar_url.is_empty());
+        assert_eq!(s.shelf_days, 0);
         assert_eq!(s.language, "auto");
     }
 

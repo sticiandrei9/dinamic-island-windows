@@ -23,14 +23,18 @@ export function init(island) {
     .tm-big { font-size: 40px; font-weight: 600; letter-spacing: -1px; font-variant-numeric: tabular-nums; color: var(--orange); cursor: ns-resize; }
     .tm-big.idle { color: #fff; }
     .tm-row { display: flex; gap: 6px; justify-content: center; }
+    .tm-row .pill-btn { white-space: nowrap; }
     .tm-sep { width: 100%; height: 1px; background: rgba(255,255,255,.08); margin: 2px 0; }
     .sw-big { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--green); }
     .sw-laps { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-size: 11px; color: var(--fg2); font-variant-numeric: tabular-nums; min-height: 0; }
     .tm-step { width: 28px; padding: 6px 0; }
+    .tm-phase { font-size: 12px; font-weight: 600; color: var(--orange); margin-bottom: -6px; }
+    .tm-phase.rest, .tm-big.rest { color: var(--green); }
   `;
   document.head.append(style);
 
   const box = el('div', 'tm');
+  const phase = el('div', 'tm-phase');
   const big = el('div', 'tm-big idle');
   const presets = el('div', 'tm-row');
   for (const m of PRESETS) {
@@ -39,6 +43,9 @@ export function init(island) {
     b.addEventListener('click', (e) => { e.stopPropagation(); minutes = m; cmd('start', m * 60); });
     presets.append(b);
   }
+  const pomoBtn = btn('pill-btn orange', 'pomo.button');
+  pomoBtn.addEventListener('click', (e) => { e.stopPropagation(); cmd('pomodoro'); });
+  presets.append(pomoBtn);
   const minus = el('button', 'pill-btn tm-step', '−');
   const plus = el('button', 'pill-btn tm-step', '+');
   const startBtn = el('button', 'pill-btn orange', 'Start');
@@ -55,7 +62,7 @@ export function init(island) {
   swRow.append(swStart, swLap, swReset);
   const laps = el('div', 'sw-laps');
 
-  box.append(big, presets, controls, el('div', 'tm-sep'), swBig, swRow, laps);
+  box.append(phase, big, presets, controls, el('div', 'tm-sep'), swBig, swRow, laps);
   pane.append(box);
 
   const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
@@ -82,8 +89,14 @@ export function init(island) {
     const running = tm?.ends_at != null;
     big.textContent = tm ? formatClock(remainingMs(tm, now)) : clock.finished ? t('timer.done') : formatClock(minutes * 60_000);
     big.classList.toggle('idle', !tm);
+    const pomo = tm ? clock.pomodoro : null;
+    const rest = pomo && pomo.phase !== 'work';
+    phase.style.display = pomo ? '' : 'none';
+    if (pomo) phase.textContent = rest ? t(`pomo.${pomo.phase}`) : t('pomo.round', { r: pomo.round, n: 4 });
+    phase.classList.toggle('rest', !!rest);
+    big.classList.toggle('rest', !!rest);
     presets.style.display = tm ? 'none' : '';
-    presets.querySelectorAll('button').forEach((b) => { b.textContent = t('timer.preset', { n: b.dataset.min }); });
+    presets.querySelectorAll('button[data-min]').forEach((b) => { b.textContent = t('timer.preset', { n: b.dataset.min }); });
     minus.style.display = plus.style.display = tm ? 'none' : '';
     startBtn.style.display = !tm || !running ? '' : 'none';
     startBtn.textContent = t(tm ? 'timer.resume' : 'timer.start');
@@ -125,7 +138,13 @@ export function init(island) {
 
   function apply(state, fromEvent) {
     const wasFinished = clock.finished;
+    const wasPhase = clock.pomodoro?.phase;
     clock = state;
+    // Pomodoro: etapa următoare a pornit singură
+    const p = state.pomodoro;
+    if (fromEvent && enabled && p && wasPhase && p.phase !== wasPhase) {
+      island.pushTransient({ kind: 'alert', icon: 'timer', title: t(p.phase === 'work' ? 'pomo.backToWork' : `pomo.${p.phase}`), detail: t('timer.preset', { n: Math.round(state.timer.total_ms / 60_000) }), color: p.phase === 'work' ? 'var(--orange)' : 'var(--green)', duration: 4000 });
+    }
     if (fromEvent && enabled && state.finished && !wasFinished) {
       island.pushTransient({ kind: 'alert', icon: 'timer', title: t('timer.finished'), color: 'var(--orange)', duration: 3000 });
     }

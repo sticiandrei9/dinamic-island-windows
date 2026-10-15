@@ -22,6 +22,11 @@ export const ICONS = {
   download: svg('<circle cx="12" cy="12" r="9.5"/><path d="M12 7.5v8M8.5 12.5 12 16l3.5-3.5"/>'),
   micOff: svg('<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4M3.5 3.5l17 17"/>'),
   mic: svg('<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4"/>'),
+  capslock: svg('<path d="M12 4 4.5 12H9v4.5h6V12h4.5z"/><path d="M9 20h6"/>'),
+  wifi: svg('<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.7 15.8a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/>'),
+  wifiOff: svg('<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.7 15.8a5 5 0 0 1 6.6 0M3.5 3.5l17 17"/><circle cx="12" cy="19" r="1" fill="currentColor"/>'),
+  vpn: svg('<path d="M12 2.5 4.5 5.5v5.5c0 5 3.3 8.5 7.5 10.5 4.2-2 7.5-5.5 7.5-10.5V5.5z"/><path d="m9 12 2 2 4-4"/>'),
+  calendar: svg('<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
   camera: svg('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10.5 5-3v9l-5-3"/>'),
 };
 

@@ -50,6 +50,14 @@ pub fn shelf_remove(list: Vec<ShelfItem>, path: &str) -> Vec<ShelfItem> {
     list.into_iter().filter(|i| !i.path.eq_ignore_ascii_case(path)).collect()
 }
 
+/// Scoate fișierele puse pe raft acum mai mult de `days` zile (0 = le păstrează).
+pub fn shelf_prune(list: Vec<ShelfItem>, days: u32, now: u64) -> Vec<ShelfItem> {
+    if days == 0 {
+        return list;
+    }
+    list.into_iter().filter(|i| now.saturating_sub(i.added_at) < days as u64 * 86_400).collect()
+}
+
 pub fn load(path: &Path) -> Vec<ShelfItem> {
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
@@ -90,6 +98,15 @@ fn update(app: &AppHandle, f: impl FnOnce(Vec<ShelfItem>) -> Vec<ShelfItem>) -> 
 
 #[tauri::command]
 pub async fn shelf_list(app: AppHandle) -> Vec<ShelfView> {
+    let days = app.state::<crate::settings::SettingsState>().get().shelf_days;
+    let state = app.state::<ShelfState>();
+    let stale = {
+        let items = state.items.lock().unwrap();
+        shelf_prune(items.clone(), days, now_secs()).len() != items.len()
+    };
+    if stale {
+        let _ = update(&app, |l| shelf_prune(l, days, now_secs()));
+    }
     let items = app.state::<ShelfState>().items.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
         // SHGetFileInfo (iconițele) cere COM pe thread
@@ -120,6 +137,28 @@ pub fn shelf_remove_path(app: AppHandle, path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn shelf_clear(app: AppHandle) -> Result<(), String> {
     update(&app, |_| Vec::new())
+}
+
+/// Pune calea fișierului în clipboard, ca text.
+#[tauri::command]
+pub fn shelf_copy_path(path: String) -> Result<(), String> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    let text: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        OpenClipboard(None).map_err(|e| e.to_string())?;
+        let result = (|| {
+            EmptyClipboard()?;
+            let mem = GlobalAlloc(GMEM_MOVEABLE, text.len() * 2)?;
+            let dst = GlobalLock(mem) as *mut u16;
+            std::ptr::copy_nonoverlapping(text.as_ptr(), dst, text.len());
+            let _ = GlobalUnlock(mem);
+            SetClipboardData(13, HANDLE(mem.0)).map(|_| ()) // CF_UNICODETEXT; clipboard-ul preia memoria
+        })();
+        let _ = CloseClipboard();
+        result.map_err(|e| e.to_string())
+    }
 }
 
 /// Deschide fișierul cu aplicația implicită.
@@ -317,6 +356,17 @@ mod tests {
         assert_eq!(list[0].name, "f0.txt"); // ordinea în care au fost trase se păstrează
         let list = shelf_add(list, &[r"C:\nou.txt".to_string()], 2);
         assert_eq!((list.len(), list[0].name.as_str(), list[29].name.as_str()), (30, "nou.txt", "f28.txt")); // cel mai vechi iese
+    }
+
+    #[test]
+    fn golire_automata_dupa_zile() {
+        let day = 86_400;
+        let list = shelf_add(Vec::new(), &paths(&[r"C:\vechi.txt"]), 0);
+        let list = shelf_add(list, &paths(&[r"C:\nou.txt"]), 6 * day);
+        assert_eq!(shelf_prune(list.clone(), 0, 100 * day).len(), 2); // 0 = niciodată
+        let kept = shelf_prune(list.clone(), 7, 7 * day);
+        assert_eq!(kept.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["nou.txt"]);
+        assert_eq!(shelf_prune(list, 7, 7 * day - 1).len(), 2);
     }
 
     #[test]

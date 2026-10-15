@@ -96,15 +96,22 @@ export function init(island) {
       closeMenu();
       menu = el('div', 'sh-menu');
       const reveal = el('button', '', t('shelf.reveal'));
+      const copy = el('button', '', t('shelf.copyPath'));
       const remove = el('button', '', t('shelf.remove'));
+      copy.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_copy_path', { path: it.path }); });
       reveal.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_reveal', { path: it.path }); island.collapse(); });
       remove.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_remove_path', { path: it.path }); });
-      menu.append(reveal, remove);
+      menu.append(reveal, copy, remove);
       const r = pane.getBoundingClientRect();
       const z = r.width / pane.offsetWidth || 1; // zoom-ul insulei
       menu.style.left = `${(e.clientX - r.left) / z}px`;
       menu.style.top = `${(e.clientY - r.top) / z}px`;
       pane.append(menu);
+      // meniul rămâne în insulă: în afara ei, click-ul ar trece la fereastra de dedesubt
+      const overY = menu.offsetTop + menu.offsetHeight - pane.offsetHeight;
+      const overX = menu.offsetLeft + menu.offsetWidth - pane.offsetWidth;
+      if (overY > 0) menu.style.top = `${Math.max(0, menu.offsetTop - overY)}px`;
+      if (overX > 0) menu.style.left = `${Math.max(0, menu.offsetLeft - overX)}px`;
     });
     return c;
   }

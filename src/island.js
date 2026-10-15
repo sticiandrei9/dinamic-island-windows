@@ -12,16 +12,17 @@ const EAR = 7;
 const BUBBLE = 32;
 const GAP = 8;
 // lățimea pastilei compacte după activitatea din ea
-const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250, call: 270 };
+const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250, call: 270, meeting: 300 };
 // mărimea insulei pentru fiecare tip de activitate tranzitorie
 const TRANSIENT = {
   alert: { w: 340, h: 40, r: 18 },
   update: { w: 330, h: 36, r: 16 },
+  kb: { w: 250, h: 36, r: 16 },
   volume: { w: 310, h: 36, r: 16 },
   notification: { w: 400, h: 78, r: 26 },
   screenshot: { w: 480, h: 80, r: 26 },
 };
-const EXPANDED_W = { home: 420, timer: 380, shelf: 440, mirror: 360 };
+const EXPANDED_W = { home: 420, timer: 440, shelf: 440, mirror: 360 };
 const SPRING = { response: 0.5, damping: 0.72 };
 
 const tauri = window.__TAURI__;
@@ -111,7 +112,7 @@ panes.set('home', {
   module: null,
   icon: ICONS.home,
   title: 'tab.home',
-  onShow: () => { media.setExpanded(true); apps.setActive(settings?.modules?.apps !== false); updateClock(); },
+  onShow: () => { media.setExpanded(true); apps.setActive(settings?.modules?.apps !== false); updateClock(); window.dispatchEvent(new Event('home-show')); },
   onHide: () => { media.setExpanded(false); apps.setActive(false); },
 });
 
@@ -216,7 +217,7 @@ function tickTransient() {
 
 function renderTransient(t) {
   transientEl.dataset.kind = t.kind;
-  if (t.kind === 'alert' || t.kind === 'update') {
+  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb') {
     transientEl.style.setProperty('--t-color', t.color ?? 'var(--fg)');
     $('t-icon').innerHTML = ICONS[t.icon] ?? ICONS.bell;
     $('t-title').textContent = t.title ?? '';
@@ -366,6 +367,13 @@ if (tauri) {
   tauri.event.listen('settings-changed', (e) => applySettings(e.payload));
   // evenimente trimise doar acestei insule (fiecare monitor are fereastra lui)
   self.listen('island-hover', (e) => onHover(!!e.payload));
+  // scurtătura de tastatură: deschide/strânge; deschisă fără mouse pe ea, se strânge singură după 8 s
+  let toggleTimer = 0;
+  self.listen('island-toggle', () => {
+    clearTimeout(toggleTimer);
+    setExpanded(!expanded);
+    if (expanded) toggleTimer = setTimeout(() => !hovering && setExpanded(false), 8000);
+  });
   self.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);
     if (!e.payload) { hovering = false; setExpanded(false); }
@@ -428,7 +436,7 @@ renderTabs();
 retarget();
 
 // modulele noi se încarcă după ce API-ul insulei există
-for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './screenshot-view.js', './shelf-view.js', './mirror-view.js']) {
+for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './screenshot-view.js', './shelf-view.js', './mirror-view.js', './output-view.js', './calendar-view.js']) {
   import(mod)
     .then((m) => {
       m.init?.(island);

@@ -12,6 +12,12 @@ A MacBook-notch-style island at the top center of your screen. It shows what's p
 
 - **Media:** Spotify, YouTube (Chrome/Edge/Firefox), VLC, Media Player and any app that reports to Windows. Shows cover art, title, artist and a draggable progress bar, with ⏮ ⏯ ⏭ controls. Click the cover or title to bring the playing app to the front.
 - **Synced lyrics** from [LRCLIB](https://lrclib.net) under the track, line by line. The title and artist of each track (including YouTube video titles) are sent to lrclib.net; turn off the Lyrics module to stop that.
+- **Pomodoro** in the Timer tab: 25 min focus, 5 min break, a 15 min break after the 4th round; phases switch on their own, with a sound.
+- **Calendar:** paste your Google Calendar secret iCal link in Settings; the island shows today's next event and, 10 minutes before a meeting, a countdown in the pill. The link stays on your PC.
+- **Keyboard:** switching the input language shows “Русский · RU” for a moment; Caps Lock shows On/Off.
+- **Shortcut:** set a key combination in Settings to open or close the island without the mouse.
+- **Audio output:** pick speakers or headphones from the Home tab (shown when you have more than one).
+- **Network:** internet lost or back, the Wi-Fi name, VPN connected or disconnected.
 - **Live Activities:** a timer and stopwatch; when two things run at once (e.g. timer + music), the second one appears as a small bubble next to the island, like on iPhone.
 - **Alerts:** charger plugged in/out, low battery, Bluetooth headphones and devices connecting (with battery level).
 - **Volume and brightness** shown in the island. On Windows 11 the system volume pop-up stays visible too.
@@ -19,7 +25,7 @@ A MacBook-notch-style island at the top center of your screen. It shows what's p
 - **Privacy dots:** orange when an app uses the microphone, green for the camera.
 - **Calls:** while an app uses the microphone (Teams, Zoom, Discord, Meet…), the island shows the app and the call duration, with a button that mutes the Windows microphone.
 - **Screenshots:** after Win+Shift+S a thumbnail appears in the island with Save and To shelf (if Snipping Tool already saved the file, that file is used).
-- **File shelf:** drag files onto the island to keep them at hand, then drag them out into any app.
+- **File shelf:** drag files onto the island to keep them at hand, then drag them out into any app. Right-click a file to copy its path; old files can leave the shelf on their own after 1, 7 or 30 days.
 - **Mirror:** a quick look at your webcam before a call.
 - **Open apps:** icons of your open windows; click one to bring it to the front.
 - **Settings:** turn each module on or off, expand on hover or click, pick the monitor (or all monitors), the size and the language (English, Română, Русский; automatic follows Windows).
@@ -76,8 +82,14 @@ O insulă în stilul notch-ului de MacBook, sus pe centrul ecranului. Din ea vez
 - **Notificările Windows** apar și în insulă (citite de pe ecran; unele aplicații pot fi ratate).
 - **Puncte de confidențialitate:** portocaliu când o aplicație folosește microfonul, verde pentru cameră.
 - **Apeluri:** cât o aplicație folosește microfonul (Teams, Zoom, Discord, Meet…), insula arată aplicația și durata apelului, cu un buton care oprește microfonul Windows.
+- **Pomodoro** în fila Timer: 25 min lucru, 5 min pauză, iar după a 4-a rundă o pauză de 15 min; etapele se schimbă singure, cu sunet.
+- **Calendar:** pui în Setări linkul secret iCal din Google Calendar; insula arată următorul eveniment de azi și, cu 10 minute înainte de o întâlnire, numărătoarea în pastilă. Linkul rămâne doar pe PC-ul tău.
+- **Tastatură:** la schimbarea limbii apare „Русский · RU” pentru o clipă; Caps Lock arată Pornit/Oprit.
+- **Scurtătură:** alegi în Setări o combinație de taste care deschide sau strânge insula fără mouse.
+- **Ieșire audio:** alegi difuzoarele sau căștile din fila Acasă (apare când ai mai mult de un dispozitiv).
+- **Rețea:** internet pierdut sau revenit, numele Wi-Fi-ului, VPN conectat sau deconectat.
 - **Capturi de ecran:** după Win+Shift+S apare în insulă o miniatură cu Salvează și Pe raft (dacă Instrumentul de decupare a salvat deja fișierul, se folosește acela).
-- **Raft de fișiere:** tragi fișiere pe insulă ca să le ai la îndemână, apoi le tragi de acolo în orice aplicație.
+- **Raft de fișiere:** tragi fișiere pe insulă ca să le ai la îndemână, apoi le tragi de acolo în orice aplicație. Click dreapta pe un fișier îi copiază calea; fișierele vechi pot ieși singure după 1, 7 sau 30 de zile.
 - **Oglindă:** te vezi rapid în camera web înainte de un apel.
 - **Aplicații deschise:** iconițele ferestrelor deschise; un click aduce aplicația în față.
 - **Setări:** pornești sau oprești fiecare modul, alegi extinderea la hover sau la click, monitorul (sau toate), mărimea și limba (Română, English, Русский; „Automat” urmează limba Windows).
@@ -134,8 +146,14 @@ Update-urile sunt acceptate doar dacă sunt semnate cu cheia privată din `%USER
 - **Уведомления Windows** дублируются в островке (считываются с экрана; некоторые приложения могут быть пропущены).
 - **Индикаторы приватности:** оранжевая точка — приложение использует микрофон, зелёная — камеру.
 - **Звонки:** пока приложение использует микрофон (Teams, Zoom, Discord, Meet…), островок показывает приложение и длительность звонка, с кнопкой, которая выключает микрофон Windows.
+- **Помодоро** на вкладке «Таймер»: 25 мин работы, 5 мин перерыва, после 4-го раунда перерыв 15 мин; этапы сменяются сами, со звуком.
+- **Календарь:** вставьте в настройках закрытую ссылку iCal из Google Календаря; островок показывает следующее событие на сегодня, а за 10 минут до встречи — обратный отсчёт. Ссылка хранится только на вашем ПК.
+- **Клавиатура:** при смене раскладки на мгновение появляется «Русский · RU»; Caps Lock показывает Вкл/Выкл.
+- **Сочетание клавиш:** задайте в настройках сочетание, которое открывает и сворачивает островок без мыши.
+- **Аудиовыход:** выбор динамиков или наушников на вкладке «Главная» (если устройств больше одного).
+- **Сеть:** потеря и возврат интернета, имя Wi-Fi, подключение и отключение VPN.
 - **Снимки экрана:** после Win+Shift+S в островке появляется миниатюра с кнопками «Сохранить» и «На полку» (если «Ножницы» уже сохранили файл, используется он).
-- **Полка для файлов:** перетащите файлы на островок, чтобы держать их под рукой, а потом перетащите их в любое приложение.
+- **Полка для файлов:** перетащите файлы на островок, чтобы держать их под рукой, а потом перетащите их в любое приложение. Правый клик по файлу копирует путь; старые файлы могут сами убираться через 1, 7 или 30 дней.
 - **Зеркало:** быстро взглянуть на себя через веб-камеру перед звонком.
 - **Открытые приложения:** значки открытых окон; по клику окно выводится на передний план.
 - **Настройки:** включение и выключение каждого модуля, раскрытие по наведению или по клику, выбор монитора (или всех), размера и языка (Русский, English, Română; «Автоматически» — как в Windows).

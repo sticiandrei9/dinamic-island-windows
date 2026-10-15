@@ -1,14 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod alerts;
+mod calendar;
 mod dev_demo;
 mod displays;
 mod hittest;
+mod hotkey;
 mod i18n;
+mod keyboard;
 mod lyrics;
 mod media;
 mod mic;
 mod notifications;
+mod output;
 mod platform;
 mod privacy;
 mod screenshot;
@@ -39,6 +43,9 @@ fn main() {
                 .rotation_strategy(RotationStrategy::KeepOne)
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(if cfg!(debug_assertions) { log::LevelFilter::Debug } else { log::LevelFilter::Info })
+                // ureq scrie adresa cerută; linkul calendarului e secret
+                .level_for("ureq", log::LevelFilter::Warn)
+                .level_for("rustls", log::LevelFilter::Warn)
                 .build(),
         )
         // Oglinda (fila insulei) folosește camera: acordăm accesul fără prompt-ul WebView2,
@@ -72,6 +79,11 @@ fn main() {
             shelf::shelf_open,
             shelf::shelf_reveal,
             shelf::shelf_drag_out,
+            shelf::shelf_copy_path,
+            output::audio_outputs,
+            output::audio_set_output,
+            calendar::calendar_fetch,
+            hotkey::hotkey_error,
             privacy::set_mirror_active,
             privacy::privacy_current,
             mic::mic_set_mute,
@@ -101,6 +113,7 @@ fn main() {
             }
             i18n::set_current(loaded.lang());
             tray::sync_autostart(app.handle(), loaded.autostart);
+            let loaded_hotkey = loaded.hotkey.clone();
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
             app.manage(shelf::ShelfState::load(app.path().app_config_dir()?.join("shelf.json")));
 
@@ -113,6 +126,11 @@ fn main() {
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());
             alerts::spawn(app.handle().clone());
+            keyboard::spawn(app.handle().clone());
+            hotkey::spawn(app.handle().clone());
+            if !loaded_hotkey.is_empty() {
+                hotkey::apply_and_report(&loaded_hotkey);
+            }
             dev_demo::spawn(app.handle().clone());
             volume::spawn(app.handle().clone());
             notifications::spawn(app.handle().clone());

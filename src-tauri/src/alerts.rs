@@ -7,6 +7,7 @@ use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, Bl
 use windows::Devices::Enumeration::DeviceInformation;
 use windows::Foundation::Collections::IIterable;
 use windows::Foundation::IReference;
+use windows::Networking::Connectivity::{NetworkConnectivityLevel, NetworkInformation};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 
 use crate::i18n::t;
@@ -101,6 +102,52 @@ pub fn bt_transition(prev: Option<&[BtDevice]>, cur: &[BtDevice]) -> Vec<Alert> 
     out
 }
 
+// ---------------- rețea ----------------
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Net {
+    pub online: bool,
+    /// numele rețelei (Wi-Fi: SSID)
+    pub name: String,
+    /// numele conexiunii VPN active
+    pub vpn: Option<String>,
+}
+
+pub fn net_transition(prev: Option<&Net>, cur: &Net) -> Vec<Alert> {
+    let Some(prev) = prev else { return Vec::new() };
+    let mut out = Vec::new();
+    if prev.online && !cur.online {
+        out.push(alert("wifiOff", &t("net.offline"), String::new(), "var(--red)", None));
+    } else if cur.online && (!prev.online || prev.name != cur.name) {
+        out.push(alert("wifi", &t("net.online"), cur.name.clone(), "var(--green)", None));
+    }
+    match (&prev.vpn, &cur.vpn) {
+        (None, Some(v)) => out.push(alert("vpn", &t("net.vpnOn"), v.clone(), "var(--green)", None)),
+        (Some(v), None) => out.push(alert("vpn", &t("net.vpnOff"), v.clone(), "var(--fg2)", None)),
+        _ => {}
+    }
+    out
+}
+
+/// Conexiunea la internet și VPN-ul activ. VPN = o conexiune pe un adaptor virtual/tunel
+/// (PPP 23, virtual 53, tunel 131): WireGuard, Tailscale, OpenVPN, VPN-ul Windows.
+fn read_net() -> windows::core::Result<Net> {
+    let mut net = Net::default();
+    if let Ok(p) = NetworkInformation::GetInternetConnectionProfile() {
+        net.online = p.GetNetworkConnectivityLevel()? == NetworkConnectivityLevel::InternetAccess;
+        net.name = p.ProfileName().map(|n| n.to_string()).unwrap_or_default();
+    }
+    for p in NetworkInformation::GetConnectionProfiles()? {
+        let kind = p.NetworkAdapter().and_then(|a| a.IanaInterfaceType()).unwrap_or(0);
+        let up = p.GetNetworkConnectivityLevel().is_ok_and(|l| l != NetworkConnectivityLevel::None);
+        if up && matches!(kind, 23 | 53 | 131) {
+            net.vpn = Some(p.ProfileName().map(|n| n.to_string()).unwrap_or_default());
+            break;
+        }
+    }
+    Ok(net)
+}
+
 const P_BATTERY: &str = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
 
 fn prop<T: windows::core::RuntimeType + 'static>(d: &DeviceInformation, key: &str) -> Option<T> {
@@ -148,17 +195,34 @@ fn read_bluetooth() -> windows::core::Result<Vec<BtDevice>> {
     Ok(out)
 }
 
-/// Baterie la 2 s, Bluetooth la 4 s; emite `alert` pentru fiecare schimbare.
+/// Baterie și rețea la 2 s, Bluetooth la 4 s; emite `alert` pentru fiecare schimbare.
+/// O schimbare de rețea e anunțată doar după ce se vede de 2 ori la rând (fără clipiri).
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut power: Option<Power> = None;
         let mut bt: Option<Vec<BtDevice>> = None;
+        let mut net: Option<Net> = None;
+        let mut net_seen: Option<Net> = None;
         let mut bt_retry_at = std::time::Instant::now();
         let mut tick = 0u32;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             tick += 1;
-            if !app.state::<SettingsState>().get().modules.alerts {
+            let modules = app.state::<SettingsState>().get().modules;
+            if !modules.network {
+                (net, net_seen) = (None, None);
+            } else if let Ok(cur) = read_net() {
+                if net.as_ref() != Some(&cur) && net_seen.as_ref() == Some(&cur) {
+                    for a in net_transition(net.as_ref(), &cur) {
+                        let _ = app.emit("alert", &a);
+                    }
+                    net = Some(cur.clone());
+                } else if net.is_none() {
+                    net = Some(cur.clone()); // prima citire: fără alerte
+                }
+                net_seen = Some(cur);
+            }
+            if !modules.alerts {
                 power = None;
                 bt = None;
                 continue;
@@ -236,6 +300,23 @@ mod tests {
     }
 
     #[test]
+    fn retea_pierduta_revenita_si_vpn() {
+        let wifi = |name: &str| Net { online: true, name: name.into(), vpn: None };
+        assert!(net_transition(None, &wifi("Acasa")).is_empty());
+        let off = Net::default();
+        let a = net_transition(Some(&wifi("Acasa")), &off);
+        assert_eq!((a.len(), a[0].icon.as_str(), a[0].color.as_str()), (1, "wifiOff", "var(--red)"));
+        let b = net_transition(Some(&off), &wifi("Acasa"));
+        assert_eq!((b[0].icon.as_str(), b[0].detail.as_str()), ("wifi", "Acasa"));
+        assert_eq!(net_transition(Some(&wifi("Acasa")), &wifi("Birou"))[0].detail, "Birou");
+        assert!(net_transition(Some(&wifi("Acasa")), &wifi("Acasa")).is_empty());
+        let vpn = Net { vpn: Some("Tailscale".into()), ..wifi("Acasa") };
+        let c = net_transition(Some(&wifi("Acasa")), &vpn);
+        assert_eq!((c.len(), c[0].icon.as_str(), c[0].detail.as_str()), (1, "vpn", "Tailscale"));
+        assert_eq!(net_transition(Some(&vpn), &wifi("Acasa"))[0].color, "var(--fg2)");
+    }
+
+    #[test]
     fn tipul_dispozitivului_din_clasa_bluetooth() {
         assert_eq!(kind_for(4, 6, "AirPods Pro 3"), "headphones");
         assert_eq!(kind_for(5, 2, "DualSense Wireless Controller"), "gamepad");
@@ -249,6 +330,7 @@ mod tests {
     #[ignore]
     fn citeste_dispozitivele_reale() {
         println!("baterie: {:?}", read_power());
+        println!("rețea: {:?}", read_net());
         match read_bluetooth() {
             Ok(list) => {
                 println!("Bluetooth conectate: {}", list.len());

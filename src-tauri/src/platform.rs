@@ -92,7 +92,7 @@ pub fn covers_monitor(win: (i32, i32, i32, i32), mon: (i32, i32, i32, i32)) -> b
     win.0 <= mon.0 && win.1 <= mon.1 && win.2 >= mon.2 && win.3 >= mon.3
 }
 
-unsafe extern "system" fn collect_hwnd(hwnd: HWND, lparam: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::BOOL {
+pub(crate) unsafe extern "system" fn collect_hwnd(hwnd: HWND, lparam: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::BOOL {
     (*(lparam.0 as *mut Vec<HWND>)).push(hwnd);
     windows::Win32::Foundation::BOOL(1)
 }

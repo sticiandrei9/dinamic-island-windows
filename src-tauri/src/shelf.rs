@@ -162,6 +162,129 @@ pub fn shelf_drag_out(window: WebviewWindow, path: String) -> Result<(), String>
     .map_err(|e| e.to_string())
 }
 
+// Tragerea fișierelor PE insulă. wry pune ținta de drop doar pe ferestrele copil existente la crearea
+// webview-ului; WebView2 își face ferestrele (în procesul lui) mai târziu, iar OLE nu urcă până la ținta
+// lui wry, deci drop-ul nu ajungea nicăieri. Punem noi ținta pe ferestrele care n-au una.
+
+#[derive(Serialize, Clone)]
+struct FileDrop {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    paths: Vec<String>,
+}
+
+#[windows::core::implement(windows::Win32::System::Ole::IDropTarget)]
+struct DropTarget {
+    app: AppHandle,
+    label: String,
+    effect: std::cell::Cell<windows::Win32::System::Ole::DROPEFFECT>,
+}
+
+impl DropTarget {
+    fn emit(&self, kind: &'static str, paths: Vec<String>) {
+        let _ = self.app.emit_to(self.label.as_str(), "file-drop", FileDrop { kind, paths });
+    }
+}
+
+/// Căile fișierelor din obiectul tras (CF_HDROP); gol dacă nu sunt fișiere.
+fn dropped_paths(data: Option<&windows::Win32::System::Com::IDataObject>) -> Vec<String> {
+    use windows::Win32::System::Com::{DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL};
+    use windows::Win32::System::Ole::{ReleaseStgMedium, CF_HDROP};
+    use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+    let Some(data) = data else { return Vec::new() };
+    let fmt = FORMATETC { cfFormat: CF_HDROP.0, ptd: std::ptr::null_mut(), dwAspect: DVASPECT_CONTENT.0, lindex: -1, tymed: TYMED_HGLOBAL.0 as u32 };
+    let Ok(mut medium) = (unsafe { data.GetData(&fmt) }) else { return Vec::new() };
+    let hdrop = HDROP(unsafe { medium.u.hGlobal.0 });
+    let n = unsafe { DragQueryFileW(hdrop, u32::MAX, None) };
+    let paths = (0..n)
+        .map(|i| {
+            let len = unsafe { DragQueryFileW(hdrop, i, None) } as usize;
+            let mut buf = vec![0u16; len + 1];
+            unsafe { DragQueryFileW(hdrop, i, Some(&mut buf)) };
+            String::from_utf16_lossy(&buf[..len])
+        })
+        .collect();
+    unsafe { ReleaseStgMedium(&mut medium) };
+    paths
+}
+
+#[allow(non_snake_case)]
+impl windows::Win32::System::Ole::IDropTarget_Impl for DropTarget_Impl {
+    fn DragEnter(
+        &self,
+        data: Option<&windows::Win32::System::Com::IDataObject>,
+        _keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+        _pt: &windows::Win32::Foundation::POINTL,
+        effect: *mut windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        use windows::Win32::System::Ole::{DROPEFFECT_COPY, DROPEFFECT_NONE};
+        let paths = dropped_paths(data);
+        let on = !paths.is_empty() && self.app.state::<crate::settings::SettingsState>().get().modules.shelf;
+        self.effect.set(if on { DROPEFFECT_COPY } else { DROPEFFECT_NONE });
+        unsafe { *effect = self.effect.get() };
+        if on {
+            self.emit("enter", paths);
+        }
+        Ok(())
+    }
+
+    fn DragOver(
+        &self,
+        _keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+        _pt: &windows::Win32::Foundation::POINTL,
+        effect: *mut windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        unsafe { *effect = self.effect.get() };
+        Ok(())
+    }
+
+    fn DragLeave(&self) -> windows::core::Result<()> {
+        if self.effect.get() != windows::Win32::System::Ole::DROPEFFECT_NONE {
+            self.emit("leave", Vec::new());
+        }
+        Ok(())
+    }
+
+    fn Drop(
+        &self,
+        data: Option<&windows::Win32::System::Com::IDataObject>,
+        _keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+        _pt: &windows::Win32::Foundation::POINTL,
+        effect: *mut windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows::core::Result<()> {
+        unsafe { *effect = self.effect.get() };
+        if self.effect.get() != windows::Win32::System::Ole::DROPEFFECT_NONE {
+            self.emit("drop", dropped_paths(data));
+        }
+        Ok(())
+    }
+}
+
+/// Pune ținta de drop pe ferestrele insulei care n-au una (apelat când cursorul intră pe insulă,
+/// deci și după ce WebView2 și-a refăcut ferestrele). Pe thread-ul principal, unde OLE e inițializat.
+pub fn ensure_drop_target(win: &WebviewWindow) {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetPropW};
+    let Some(root) = crate::platform::hwnd_of(win) else { return };
+    let (root, app, label) = (root.0 as isize, win.app_handle().clone(), win.label().to_string());
+    let _ = win.run_on_main_thread(move || {
+        let mut children: Vec<HWND> = Vec::new();
+        unsafe {
+            let _ = EnumChildWindows(HWND(root as _), Some(crate::platform::collect_hwnd), LPARAM(&mut children as *mut Vec<HWND> as isize));
+        }
+        for hwnd in children {
+            if !unsafe { GetPropW(hwnd, windows::core::w!("OleDropTargetInterface")) }.0.is_null() {
+                continue;
+            }
+            let target: windows::Win32::System::Ole::IDropTarget =
+                DropTarget { app: app.clone(), label: label.clone(), effect: Default::default() }.into();
+            if let Err(e) = unsafe { windows::Win32::System::Ole::RegisterDragDrop(hwnd, &target) } {
+                log::debug!("raft: ținta de drop n-a putut fi pusă pe o fereastră: {e}");
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

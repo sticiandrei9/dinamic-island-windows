@@ -119,8 +119,8 @@ export function init(island) {
   island.registerPane('shelf', { module: 'shelf', icon: ICONS.shelf, title: 'tab.shelf', onShow: refresh, onHide: closeMenu });
   tauri.event.listen('shelf-changed', refresh);
 
-  // fișiere trase peste insulă
-  self.onDragDropEvent((e) => {
+  // fișiere trase peste insulă: ținta noastră (`file-drop`) sau, unde a prins, cea a lui wry
+  const onDrop = (e) => {
     if (!enabled) return;
     const { type, paths } = e.payload;
     if (type === 'enter') {
@@ -132,7 +132,9 @@ export function init(island) {
     } else if (type === 'leave') {
       document.body.classList.remove('drop-target');
     }
-  });
+  };
+  self.onDragDropEvent(onDrop);
+  self.listen('file-drop', onDrop);
 
   window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.shelf !== false; render(); });
   refresh();

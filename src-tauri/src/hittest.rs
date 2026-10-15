@@ -108,6 +108,9 @@ pub fn spawn(app: AppHandle) {
                 if st.inside != Some(inside) {
                     st.inside = Some(inside);
                     let _ = win.set_ignore_cursor_events(!inside);
+                    if inside {
+                        crate::shelf::ensure_drop_target(&win);
+                    }
                     let _ = app.emit_to(label.as_str(), "island-hover", inside);
                 }
             }

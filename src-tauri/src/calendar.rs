@@ -68,8 +68,33 @@ pub async fn calendar_fetch(app: AppHandle) -> Result<Option<String>, String> {
     Ok(Some(text))
 }
 
+/// Linkurile pe care insula le poate deschide din calendar: doar https, fără ghilimele
+/// (vin din fișierul iCal, adică din textul evenimentelor, și ajung în linia de comandă a lui explorer).
+pub fn safe_link(url: &str) -> bool {
+    url.starts_with("https://") && !url.chars().any(|c| c == '"' || c.is_whitespace() || c.is_control())
+}
+
+/// Deschide evenimentul în Google Calendar sau linkul întâlnirii, în browserul implicit.
+#[tauri::command]
+pub fn calendar_open(url: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    if !safe_link(&url) {
+        return Err("link refuzat".into());
+    }
+    std::process::Command::new("explorer").raw_arg(format!("\"{url}\"")).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn linkuri_deschise_doar_https() {
+        assert!(super::safe_link("https://meet.google.com/abc-defg-hij"));
+        assert!(super::safe_link("https://www.google.com/calendar/event?eid=abc"));
+        assert!(!super::safe_link("file:///C:/Windows/System32/calc.exe"));
+        assert!(!super::safe_link("https://x.com/\" & calc"));
+        assert!(!super::safe_link("https://x.com/a b"));
+    }
+
     use super::*;
 
     #[test]

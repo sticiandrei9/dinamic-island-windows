@@ -80,6 +80,7 @@ function parseEvents(text) {
     const { name, params, value } = parseLine(line);
     if (name === 'SUMMARY') ev.title = unescape(value);
     else if (name === 'UID') ev.uid = value;
+    else if (name === 'DESCRIPTION' || name === 'LOCATION' || name === 'X-GOOGLE-CONFERENCE') ev.text = `${ev.text ?? ''} ${unescape(value)}`;
     else if (name === 'STATUS') ev.cancelled = value.toUpperCase() === 'CANCELLED';
     else if (name === 'DTSTART') ev.start = parseDate(value, params);
     else if (name === 'DTEND') ev.end = parseDate(value, params);
@@ -178,6 +179,26 @@ function occurrences(ev, duration, from, to) {
   return out;
 }
 
+// linkul de intrare într-o întâlnire online (Meet, Zoom, Teams), din descriere/locație
+const MEETING = /https:\/\/(?:meet\.google\.com|[\w.-]*zoom\.us|teams\.microsoft\.com|teams\.live\.com)\/[^\s"<>]*/i;
+function meetingLink(text) {
+  return text?.match(MEETING)?.[0] ?? null;
+}
+
+// Pagina evenimentului în Google Calendar (eid = base64 din „id calendar”, ca linkurile Google);
+// fără UID Google, ziua evenimentului.
+export function googleEventUrl(ev, icsUrl) {
+  const cal = /\/calendar\/ical\/([^/]+)\//.exec(icsUrl ?? '');
+  const id = ev.uid?.endsWith('@google.com') ? ev.uid.slice(0, -'@google.com'.length) : null;
+  if (cal && id) {
+    const calId = decodeURIComponent(cal[1]).replace(/@gmail\.com$/, '@m');
+    const instance = ev.recurring ? `_${new Date(ev.start).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '')}` : '';
+    return `https://www.google.com/calendar/event?eid=${btoa(`${id}${instance} ${calId}`).replace(/=+$/, '')}`;
+  }
+  const d = new Date(ev.start);
+  return `https://calendar.google.com/calendar/r/day/${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 // Evenimentele care se termină după `now` și încep înainte de `now + horizon`, sortate.
 export function upcoming(text, now, horizon) {
   const events = parseEvents(text).filter((e) => e.start && !e.start.allDay);
@@ -191,7 +212,7 @@ export function upcoming(text, now, horizon) {
     const duration = e.end ? toEpoch(e.end.wall, e.end.tz) - start : e.duration ?? 0;
     for (const at of occurrences(e.recurrenceId != null ? { ...e, rrule: null } : e, duration, now, now + horizon)) {
       if (e.recurrenceId == null && moved.has(`${e.uid}|${at}`)) continue;
-      if (!e.cancelled) out.push({ title: e.title ?? '', start: at, end: at + duration });
+      if (!e.cancelled) out.push({ title: e.title ?? '', start: at, end: at + duration, uid: e.uid, recurring: !!e.rrule || e.recurrenceId != null, link: meetingLink(e.text) });
     }
   }
   return out.sort((a, b) => a.start - b.start);

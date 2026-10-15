@@ -181,7 +181,8 @@
     "module.calendar": "Calendar",
     "module.calendar.hint": "Următoarea întâlnire, cu 10 minute înainte",
     "settings.calendarOk": "Calendarul a fost citit. Linkul rămâne doar pe acest PC.",
-    "settings.calendarError": "Linkul nu merge ({v}). Verifică adresa secretă iCal."
+    "settings.calendarError": "Linkul nu merge ({v}). Verifică adresa secretă iCal.",
+    "cal.join": "Intră"
   },
   "en": {
     "tab.home": "Home",
@@ -360,7 +361,8 @@
     "module.calendar": "Calendar",
     "module.calendar.hint": "Next meeting, 10 minutes ahead",
     "settings.calendarOk": "Calendar read. The link stays on this PC.",
-    "settings.calendarError": "The link does not work ({v}). Check the secret iCal address."
+    "settings.calendarError": "The link does not work ({v}). Check the secret iCal address.",
+    "cal.join": "Join"
   },
   "ru": {
     "tab.home": "Главная",
@@ -549,6 +551,7 @@
     "module.calendar": "Календарь",
     "module.calendar.hint": "Следующая встреча, за 10 минут",
     "settings.calendarOk": "Календарь прочитан. Ссылка хранится только на этом ПК.",
-    "settings.calendarError": "Ссылка не работает ({v}). Проверьте закрытый адрес iCal."
+    "settings.calendarError": "Ссылка не работает ({v}). Проверьте закрытый адрес iCal.",
+    "cal.join": "Войти"
   }
 }

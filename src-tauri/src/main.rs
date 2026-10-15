@@ -83,6 +83,7 @@ fn main() {
             output::audio_outputs,
             output::audio_set_output,
             calendar::calendar_fetch,
+            calendar::calendar_open,
             hotkey::hotkey_error,
             privacy::set_mirror_active,
             privacy::privacy_current,

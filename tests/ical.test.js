@@ -23,7 +23,7 @@ test('eveniment simplu, linii împăturite, toată ziua și anulate sărite', ()
     ['UID:d', 'SUMMARY:Trecut', 'DTSTART:20261014T120000Z', 'DTEND:20261014T130000Z'],
   );
   const now = Date.UTC(2026, 9, 15, 11, 0);
-  assert.deepEqual(upcoming(text, now, D), [{ title: 'Ședință cu echipa', start: Date.UTC(2026, 9, 15, 12), end: Date.UTC(2026, 9, 15, 13) }]);
+  assert.deepEqual(upcoming(text, now, D).map(({ title, start, end }) => ({ title, start, end })), [{ title: 'Ședință cu echipa', start: Date.UTC(2026, 9, 15, 12), end: Date.UTC(2026, 9, 15, 13) }]);
   // în desfășurare: încă apare
   assert.equal(upcoming(text, Date.UTC(2026, 9, 15, 12, 30), D).length, 1);
 });
@@ -98,4 +98,24 @@ test('un calendar cu ani de istoric se citește repede', () => {
   const out = upcoming(cal(...evs), Date.UTC(2026, 9, 15), D);
   assert.equal(out.length, 200); // joi 15 oct, 9:00 București
   assert.ok(performance.now() - t0 < 500, `prea lent: ${Math.round(performance.now() - t0)} ms`);
+});
+
+test('linkul evenimentului în Google Calendar și linkul de întâlnire', async () => {
+  const { googleEventUrl } = await import('../src/lib/ical.js');
+  const ics = 'https://calendar.google.com/calendar/ical/sticiandrei9%40gmail.com/private-abc/basic.ics';
+  const text = cal(
+    ['UID:rsccfgcdu75acq7nhr06er3ls4@google.com', 'SUMMARY:Test', 'DTSTART:20261015T202700Z', 'DTEND:20261015T204200Z',
+      String.raw`DESCRIPTION:Detalii\nIntră: https://meet.google.com/abc-defg-hij`],
+    ['UID:rec@google.com', 'SUMMARY:Zilnic', 'DTSTART:20261001T080000Z', 'DTEND:20261001T081000Z', 'RRULE:FREQ=DAILY',
+      'LOCATION:https://us02web.zoom.us/j/123?pwd=x'],
+  );
+  const [rec, single] = upcoming(text, Date.UTC(2026, 9, 15, 7), D);
+  assert.equal(single.link, 'https://meet.google.com/abc-defg-hij');
+  assert.equal(rec.link, 'https://us02web.zoom.us/j/123?pwd=x');
+  // același eid ca linkul dat de Google pentru eveniment
+  assert.equal(googleEventUrl(single, ics), 'https://www.google.com/calendar/event?eid=cnNjY2ZnY2R1NzVhY3E3bmhyMDZlcjNsczQgc3RpY2lhbmRyZWk5QG0');
+  // o apariție dintr-o repetare: id_ORAUTC
+  assert.equal(googleEventUrl(rec, ics), 'https://www.google.com/calendar/event?eid=' + btoa('rec_20261015T080000Z sticiandrei9@m').replace(/=+$/, ''));
+  // fără UID Google: ziua în calendar
+  assert.equal(googleEventUrl({ start: Date.UTC(2026, 9, 15, 12) }, ''), 'https://calendar.google.com/calendar/r/day/2026/10/15');
 });

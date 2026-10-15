@@ -197,6 +197,10 @@ body.no-apps .apps { display: none; }
 .c-meet-text { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .cal-row { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; }
 .cal-row[hidden] { display: none; }
+.cal-row { cursor: pointer; border-radius: 8px; padding: 2px 8px; margin-left: auto; margin-right: auto; width: fit-content; max-width: 100%; }
+.cal-row:hover { background: rgba(255, 255, 255, .08); }
+.cal-join { flex: none; border: 0; border-radius: 6px; padding: 2px 9px; margin-left: 4px; background: #64d2ff; color: #000; font: inherit; font-weight: 600; cursor: pointer; }
+.cal-join:active { transform: scale(.94); }
 .cal-row svg { width: 13px; height: 13px; flex: none; color: #64d2ff; }
 .cal-row b { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .out-row { position: relative; display: flex; justify-content: center; margin-top: 8px; }

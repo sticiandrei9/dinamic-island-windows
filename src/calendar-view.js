@@ -1,6 +1,6 @@
 import { ICONS } from './icons.js';
 import { t, locale } from './lib/i18n.js';
-import { upcoming } from './lib/ical.js';
+import { upcoming, googleEventUrl } from './lib/ical.js';
 
 const SOON = 10 * 60_000; // pastila apare cu 10 minute înainte
 const AFTER = 5 * 60_000; // și rămâne 5 minute după început
@@ -17,6 +17,14 @@ export function init(island) {
   let expanded = []; // evenimentele următoarelor 48 h, calculate o dată la descărcare
   let url = '';
   let enabled = false;
+  let shownEvent = null; // evenimentul din rândul filei Acasă
+
+  const open = (link) => {
+    invoke('calendar_open', { url: link }).catch((err) => invoke('log_js', { msg: `calendar: deschiderea a eșuat: ${err}` }));
+    island.collapse();
+  };
+  // click pe rând: evenimentul în Google Calendar
+  row.addEventListener('click', (e) => { e.stopPropagation(); if (shownEvent) open(googleEventUrl(shownEvent, url)); });
 
   async function load() {
     if (!enabled) return tick();
@@ -33,10 +41,17 @@ export function init(island) {
 
     const today = events.find((e) => e.start < midnight);
     row.hidden = !today;
+    shownEvent = today ?? null;
     if (today) {
       const when = today.start <= now ? t('cal.now') : new Date(today.start).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
       row.innerHTML = ICONS.calendar; // pictogramă constantă; textul evenimentului intră doar ca text
       row.append(Object.assign(document.createElement('b'), { textContent: today.title }), ` · ${when}`);
+      // întâlnire online: buton „Intră” direct în Meet/Zoom/Teams
+      if (today.link) {
+        const join = Object.assign(document.createElement('button'), { className: 'cal-join', textContent: t('cal.join') });
+        join.addEventListener('click', (e) => { e.stopPropagation(); open(today.link); });
+        row.append(join);
+      }
     }
 
     const soon = events.find((e) => e.start - now <= SOON && now < e.start + AFTER);

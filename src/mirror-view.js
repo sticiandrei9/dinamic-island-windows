@@ -1,4 +1,5 @@
 import { ICONS } from './icons.js';
+import { t } from './lib/i18n.js';
 import { nextCamera, pickCamera } from './lib/mirror.js';
 
 const IDLE_MS = 60_000;
@@ -30,7 +31,8 @@ export function init(island) {
   msg.className = 'mr-msg';
   const sw = document.createElement('button');
   sw.className = 'mr-switch';
-  sw.title = 'Altă cameră';
+  sw.dataset.i18nTitle = 'mirror.switch';
+  sw.title = t('mirror.switch');
   sw.innerHTML = ICONS.camera; // pictogramă constantă
   box.append(video, msg, sw);
   pane.append(box);
@@ -62,7 +64,7 @@ export function init(island) {
 
   function armIdle() {
     clearTimeout(idle);
-    idle = setTimeout(() => { stop(); message('Oglinda s-a oprit după un minut. Apasă ca s-o pornești din nou.', true); }, IDLE_MS);
+    idle = setTimeout(() => { stop(); message(t('mirror.idle'), true); }, IDLE_MS);
   }
 
   let gen = 0;
@@ -84,7 +86,7 @@ export function init(island) {
       armIdle();
     } catch (e) {
       stop();
-      message('Camera nu e disponibilă', true);
+      message(t('mirror.unavailable'), true);
     }
   }
 
@@ -103,5 +105,5 @@ export function init(island) {
     start(id);
   });
 
-  island.registerPane('mirror', { module: 'mirror', icon: ICONS.mirror, title: 'Oglindă', onShow: show, onHide: stop });
+  island.registerPane('mirror', { module: 'mirror', icon: ICONS.mirror, title: 'tab.mirror', onShow: show, onHide: stop });
 }

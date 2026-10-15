@@ -1,23 +1,25 @@
 import { Spring } from './lib/spring.js';
 import { islandPath, islandRect } from './lib/shape.js';
 import { sizeScale } from './lib/util.js';
-import { layout, enqueue, advance, current } from './lib/activities.js';
+import { layout, enqueue, advance, current, holdHead } from './lib/activities.js';
 import { ICONS, speakerIcon } from './icons.js';
 import { MediaView } from './media-view.js';
 import { AppsView } from './apps-view.js';
+import { t, setLang, locale, applyStatic } from './lib/i18n.js';
 
 const W = 520;
 const EAR = 7;
 const BUBBLE = 32;
 const GAP = 8;
 // lățimea pastilei compacte după activitatea din ea
-const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250 };
+const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250, call: 270 };
 // mărimea insulei pentru fiecare tip de activitate tranzitorie
 const TRANSIENT = {
   alert: { w: 340, h: 40, r: 18 },
   update: { w: 330, h: 36, r: 16 },
   volume: { w: 310, h: 36, r: 16 },
   notification: { w: 400, h: 78, r: 26 },
+  screenshot: { w: 430, h: 80, r: 26 },
 };
 const EXPANDED_W = { home: 420, timer: 380, shelf: 440, mirror: 360 };
 const SPRING = { response: 0.5, damping: 0.72 };
@@ -62,6 +64,7 @@ export const island = {
   tauri,
   get settings() { return settings; },
   get expanded() { return expanded; },
+  get shown() { return shown; },
   setActivity(id, activity) {
     if (activity) persistent.set(id, { id, ...activity });
     else persistent.delete(id);
@@ -102,7 +105,7 @@ const apps = new AppsView({ invoke, onPicked: () => setExpanded(false) });
 panes.set('home', {
   module: null,
   icon: ICONS.home,
-  title: 'Acasă',
+  title: 'tab.home',
   onShow: () => { media.setExpanded(true); apps.setActive(true); updateClock(); },
   onHide: () => { media.setExpanded(false); apps.setActive(false); },
 });
@@ -190,6 +193,7 @@ function renderActivities() {
 let ticker = 0;
 function tickTransient() {
   const now = performance.now();
+  if (hovering) queue = holdHead(queue, now);
   queue = advance(queue, now);
   const next = current(queue, now);
   if (next !== shown) {
@@ -216,6 +220,9 @@ function renderTransient(t) {
     $('v-icon').innerHTML = t.source === 'brightness' ? ICONS.sun : speakerIcon(t.waves ?? 2, t.muted);
     $('v-fill').style.width = `${Math.round((t.muted ? 0 : t.level) * 100)}%`;
     $('v-pct').textContent = t.muted ? '—' : `${Math.round(t.level * 100)}%`;
+  } else if (t.kind === 'screenshot') {
+    $('s-thumb').src = t.thumb;
+    $('s-size').textContent = `${t.width} × ${t.height}`;
   } else if (t.kind === 'notification') {
     $('n-icon').src = t.icon ?? '';
     $('n-app').textContent = t.app ?? '';
@@ -238,7 +245,7 @@ function renderTabs() {
   tabsEl.classList.toggle('single', list.length < 2);
   for (const [id, p] of list) {
     const b = document.createElement('button');
-    b.title = p.title;
+    b.title = t(p.title);
     b.innerHTML = p.icon; // pictogramă constantă din icons.js
     b.classList.toggle('on', id === tab);
     if (p.badge) {
@@ -283,14 +290,18 @@ function setExpanded(on, toTab) {
 
 // hover: extindere după 120 ms, strângere după 220 ms (ca să nu „pâlpâie”)
 let hoverTimer = 0;
+let hovering = false;
 function onHover(inside) {
+  hovering = inside;
   clearTimeout(hoverTimer);
+  // pe o tranzitorie cu butoane (captura), cursorul o ține afișată în loc să extindă insula
+  if (inside && shown?.interactive) return;
   if (inside && !expandOnHover) return; // în modul „doar la click”, hover-ul doar strânge
   hoverTimer = setTimeout(() => setExpanded(inside), inside ? 120 : 220);
 }
 
 $('stage').addEventListener('click', () => {
-  if (!expanded) {
+  if (!expanded && !shown?.interactive) {
     clearTimeout(hoverTimer);
     setExpanded(true);
   }
@@ -303,8 +314,8 @@ bubbleEl.addEventListener('click', (e) => {
 
 function updateClock() {
   const now = new Date();
-  $('x-time').textContent = now.toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
-  const date = now.toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' });
+  $('x-time').textContent = now.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+  const date = now.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
   $('x-date').textContent = date.charAt(0).toUpperCase() + date.slice(1);
 }
 setInterval(() => expanded && tab === 'home' && updateClock(), 1000);
@@ -313,6 +324,9 @@ setInterval(() => expanded && tab === 'home' && updateClock(), 1000);
 function applySettings(st) {
   if (!st) return;
   settings = st;
+  setLang(st.resolved_language ?? 'ro');
+  applyStatic();
+  if (expanded && tab === 'home') updateClock();
   zoom = sizeScale(st.size);
   $('stage').style.zoom = zoom;
   expandOnHover = st.expand_on !== 'click';
@@ -338,7 +352,13 @@ if (tauri) {
   });
   // după ce ascultăm, cerem și starea curentă (evenimentele de dinainte de încărcare s-au pierdut)
   const mediaOn = () => settings?.modules?.media !== false;
-  tauri.event.listen('media-update', (e) => mediaOn() && media.update(e.payload ?? null))
+  tauri.event.listen('media-update', (e) => {
+    if (!mediaOn()) return;
+    const p = e.payload ?? null;
+    // fără copertă în mesaj și fără una afișată (fereastră nouă): cerem starea completă
+    if (p && !('thumbnail' in p) && !media.info?.thumbnail) invoke('media_current').then((i) => media.update(i ?? p)).catch(() => media.update(p));
+    else media.update(p);
+  })
     .then(() => invoke('media_current'))
     .then((info) => { if (info && mediaOn() && !media.hasMedia()) media.update(info); })
     .catch(() => {});
@@ -349,16 +369,16 @@ if (tauri) {
     const ready = st?.kind === 'ready';
     $('x-update').hidden = !ready;
     if (!ready) return;
-    $('x-update-text').textContent = `v${st.version} disponibilă`;
+    $('x-update-text').textContent = t('update.available', { v: st.version });
     if (announced === st.version) return;
     announced = st.version;
-    island.pushTransient({ kind: 'update', icon: 'download', color: 'var(--green)', title: 'Actualizare disponibilă', detail: `v${st.version}`, duration: 4000 });
+    island.pushTransient({ kind: 'update', icon: 'download', color: 'var(--green)', title: t('update.title'), detail: `v${st.version}`, duration: 4000 });
   };
   tauri.event.listen('update-state', (e) => onUpdateState(e.payload));
   invoke('get_update_state').then(onUpdateState).catch(() => {});
   tauri.event.listen('update-installing', (e) => {
     setExpanded(false);
-    island.pushTransient({ kind: 'update', icon: 'download', color: 'var(--green)', title: 'Se instalează', detail: `v${e.payload}`, duration: 120000 });
+    island.pushTransient({ kind: 'update', icon: 'download', color: 'var(--green)', title: t('update.installing'), detail: `v${e.payload}`, duration: 120000 });
   });
   tauri.event.listen('update-failed', () => island.dropTransients('update'));
   $('x-update-apply').addEventListener('click', (e) => {
@@ -383,7 +403,7 @@ renderTabs();
 retarget();
 
 // modulele noi se încarcă după ce API-ul insulei există
-for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './shelf-view.js', './mirror-view.js']) {
+for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './screenshot-view.js', './shelf-view.js', './mirror-view.js']) {
   import(mod)
     .then((m) => m.init?.(island))
     .catch((e) => { if (!String(e).includes('Failed to fetch')) logJs(`${mod}: ${e?.stack ?? e}`); });

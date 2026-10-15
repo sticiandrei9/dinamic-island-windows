@@ -1,23 +1,14 @@
 import { updateStatusText, monitorLabel } from './lib/settings-ui.js';
+import { t, setLang, applyStatic } from './lib/i18n.js';
 
 const tauri = window.__TAURI__;
 const invoke = tauri.core.invoke;
 
-const MODULES = [
-  ['media', 'Media', 'Ce cântă: Spotify, YouTube, playere; control ⏮ ⏯ ⏭'],
-  ['lyrics', 'Versuri', 'Versuri sincronizate de pe LRCLIB, în insula extinsă'],
-  ['apps', 'Aplicații deschise', 'Iconițele ferestrelor; click aduce aplicația în față'],
-  ['timer', 'Timer și cronometru', 'Timpul rămas apare în insulă'],
-  ['privacy', 'Microfon și cameră', 'Punct portocaliu / verde când sunt folosite'],
-  ['alerts', 'Alerte de sistem', 'Încărcător, baterie, dispozitive Bluetooth'],
-  ['volume', 'Volum și luminozitate', 'Afișate în insulă (pe Windows 11 rămâne și pop-up-ul sistemului)'],
-  ['notifications', 'Notificări Windows', 'Notificările apar și în insulă'],
-  ['shelf', 'Raft de fișiere', 'Trage fișiere pe insulă ca să le ai la îndemână'],
-  ['mirror', 'Oglindă cameră', 'Vezi-te înainte de un apel'],
-];
+const MODULES = ['media', 'lyrics', 'apps', 'timer', 'privacy', 'calls', 'alerts', 'volume', 'notifications', 'screenshots', 'shelf', 'mirror'];
 
 let settings = null;
 let updateState = { kind: 'idle' };
+let version = '';
 
 function save() {
   invoke('set_settings', { settings }).catch((e) => console.error(e));
@@ -26,14 +17,14 @@ function save() {
 function renderModules() {
   const box = document.getElementById('modules');
   box.replaceChildren();
-  for (const [key, title, desc] of MODULES) {
+  for (const key of MODULES) {
     const row = document.createElement('div');
     row.className = 'row';
     const label = document.createElement('div');
     label.className = 'label';
-    label.textContent = title;
+    label.textContent = t(`module.${key}`);
     const small = document.createElement('small');
-    small.textContent = desc;
+    small.textContent = t(`module.${key}.hint`);
     label.append(small);
     const sw = document.createElement('label');
     sw.className = 'switch';
@@ -54,14 +45,23 @@ function renderControls() {
   });
   document.querySelectorAll('input[data-key]').forEach((i) => { i.checked = !!settings[i.dataset.key]; });
   document.getElementById('monitor').value = settings.monitor;
+  document.getElementById('language').value = settings.language ?? 'auto';
+}
+
+// limba: textele statice, cele generate și titlul ferestrei
+function applyLanguage() {
+  setLang(settings.resolved_language ?? 'ro');
+  applyStatic();
+  document.title = t('settings.title');
+  document.getElementById('version').textContent = t('settings.version', { v: version });
 }
 
 async function renderMonitors() {
   const select = document.getElementById('monitor');
   const monitors = await invoke('list_monitors').catch(() => []);
-  const opts = [['primary', 'Principal'], ...monitors.map((m, i) => [m.name, monitorLabel(m, i)]), ['all', 'Toate monitoarele']];
+  const opts = [['primary', t('settings.primary')], ...monitors.map((m, i) => [m.name, monitorLabel(m, i)]), ['all', t('settings.allMonitors')]];
   // un monitor ales care acum e deconectat rămâne în listă, ca alegerea să nu se piardă
-  if (settings.monitor && !opts.some(([v]) => v === settings.monitor)) opts.splice(1, 0, [settings.monitor, 'Monitor deconectat']);
+  if (settings.monitor && !opts.some(([v]) => v === settings.monitor)) opts.splice(1, 0, [settings.monitor, t('settings.disconnected')]);
   select.replaceChildren(...opts.map(([value, text]) => Object.assign(document.createElement('option'), { value, textContent: text })));
   select.value = settings.monitor;
 }
@@ -86,18 +86,26 @@ document.querySelectorAll('input[data-key]').forEach((i) => {
   i.addEventListener('change', () => { settings[i.dataset.key] = i.checked; save(); });
 });
 document.getElementById('monitor').addEventListener('change', (e) => { settings.monitor = e.target.value; save(); });
+document.getElementById('language').addEventListener('change', (e) => { settings.language = e.target.value; save(); });
 document.getElementById('check-now').addEventListener('click', () => invoke('check_updates_now'));
-document.getElementById('apply').addEventListener('click', () => invoke('apply_update').catch((e) => { document.getElementById('update-status').textContent = `Eroare: ${e}`; }));
+document.getElementById('apply').addEventListener('click', () => invoke('apply_update').catch((e) => { document.getElementById('update-status').textContent = t('error', { v: e }); }));
 document.getElementById('open-logs').addEventListener('click', () => invoke('open_log_dir'));
 
-tauri.event.listen('settings-changed', (e) => { settings = e.payload; renderModules(); renderControls(); });
+tauri.event.listen('settings-changed', (e) => {
+  const langChanged = e.payload.resolved_language !== settings?.resolved_language;
+  settings = e.payload;
+  if (langChanged) { applyLanguage(); renderMonitors(); renderUpdate(); }
+  renderModules();
+  renderControls();
+});
 tauri.event.listen('update-state', (e) => { updateState = e.payload; renderUpdate(); });
 setInterval(renderUpdate, 30_000); // „verificat acum X minute” rămâne actual
 
 (async () => {
   settings = await invoke('get_settings');
   updateState = await invoke('get_update_state');
-  document.getElementById('version').textContent = `Versiunea ${await tauri.app.getVersion()}`;
+  version = await tauri.app.getVersion();
+  applyLanguage();
   renderModules();
   await renderMonitors();
   renderControls();

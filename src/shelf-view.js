@@ -1,4 +1,5 @@
 import { ICONS } from './icons.js';
+import { t } from './lib/i18n.js';
 
 const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls ?? '', textContent: text ?? '' });
 
@@ -38,19 +39,22 @@ export function init(island) {
   pane.style.position = 'relative';
   const head = el('div', 'sh-head');
   const count = el('span');
-  const clear = el('button', 'pill-btn', 'Golește');
+  const clear = el('button', 'pill-btn', t('shelf.clear'));
+  clear.dataset.i18n = 'shelf.clear';
   clear.style.padding = '3px 10px';
   head.append(count, clear);
   const grid = el('div', 'sh-grid');
-  const empty = el('div', 'sh-empty', 'Trage fișiere pe insulă ca să le ții la îndemână');
-  const drop = el('div', 'sh-drop', 'Lasă aici');
+  const empty = el('div', 'sh-empty', t('shelf.empty'));
+  empty.dataset.i18n = 'shelf.empty';
+  const drop = el('div', 'sh-drop', t('shelf.drop'));
+  drop.dataset.i18n = 'shelf.drop';
   pane.append(head, grid, empty, drop);
 
   let menu = null;
   const closeMenu = () => { menu?.remove(); menu = null; };
 
   function render() {
-    count.textContent = items.length ? `${items.length} ${items.length === 1 ? 'element' : 'elemente'}` : 'Raft';
+    count.textContent = items.length ? t('shelf.count', { n: items.length }) : t('tab.shelf');
     clear.style.visibility = items.length ? 'visible' : 'hidden';
     empty.style.display = items.length ? 'none' : '';
     grid.style.display = items.length ? '' : 'none';
@@ -61,7 +65,7 @@ export function init(island) {
 
   function card(it) {
     const c = el('div', `sh-card${it.exists ? '' : ' missing'}`);
-    c.title = it.exists ? it.path : 'Fișier mutat sau șters';
+    c.title = it.exists ? it.path : t('shelf.missing');
     if (it.icon) c.append(Object.assign(document.createElement('img'), { src: it.icon, alt: '', draggable: false }));
     else { const ph = el('div', 'sh-ph'); ph.innerHTML = ICONS.shelf; c.append(ph); }
     c.append(el('div', 'sh-name', it.name));
@@ -91,8 +95,8 @@ export function init(island) {
       e.stopPropagation();
       closeMenu();
       menu = el('div', 'sh-menu');
-      const reveal = el('button', '', 'Arată în Explorer');
-      const remove = el('button', '', 'Scoate de pe raft');
+      const reveal = el('button', '', t('shelf.reveal'));
+      const remove = el('button', '', t('shelf.remove'));
       reveal.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_reveal', { path: it.path }); island.collapse(); });
       remove.addEventListener('click', (ev) => { ev.stopPropagation(); closeMenu(); invoke('shelf_remove_path', { path: it.path }); });
       menu.append(reveal, remove);
@@ -112,7 +116,7 @@ export function init(island) {
 
   clear.addEventListener('click', (e) => { e.stopPropagation(); invoke('shelf_clear'); });
   document.addEventListener('click', closeMenu);
-  island.registerPane('shelf', { module: 'shelf', icon: ICONS.shelf, title: 'Raft', onShow: refresh, onHide: closeMenu });
+  island.registerPane('shelf', { module: 'shelf', icon: ICONS.shelf, title: 'tab.shelf', onShow: refresh, onHide: closeMenu });
   tauri.event.listen('shelf-changed', refresh);
 
   // fișiere trase peste insulă
@@ -130,6 +134,6 @@ export function init(island) {
     }
   });
 
-  window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.shelf !== false; });
+  window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.shelf !== false; render(); });
   refresh();
 }

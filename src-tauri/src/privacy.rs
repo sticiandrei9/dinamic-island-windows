@@ -20,6 +20,10 @@ pub struct Entry {
 pub struct Privacy {
     pub mic: Vec<String>,
     pub cam: Vec<String>,
+    /// de când e folosit microfonul (ms unix), pentru durata apelului
+    pub mic_since: Option<u64>,
+    /// microfonul Windows e pe mute (None = nu există microfon implicit)
+    pub mic_muted: Option<bool>,
 }
 
 /// `C:#Apps#Discord.exe` → `Discord`; `Microsoft.WindowsCamera_8wekyb3d8bbwe` → `WindowsCamera`.
@@ -32,20 +36,30 @@ pub fn friendly_app(key: &str) -> String {
     family.rsplit('.').next().unwrap_or(family).to_string()
 }
 
+fn active<'a>(entries: &'a [Entry], self_exe: &str) -> impl Iterator<Item = &'a Entry> {
+    let me = self_exe.to_lowercase().replace('\\', "#");
+    entries.iter().filter(move |e| e.start > 0 && e.stop == 0 && (me.is_empty() || e.key.to_lowercase() != me))
+}
+
 /// Aplicațiile care folosesc dispozitivul acum (pornit și neoprit), fără Dynamic Island.
 pub fn in_use(entries: &[Entry], self_exe: &str) -> Vec<String> {
-    let me = self_exe.to_lowercase().replace('\\', "#");
     let mut out: Vec<String> = Vec::new();
-    for e in entries.iter().filter(|e| e.start > 0 && e.stop == 0) {
-        if !me.is_empty() && e.key.to_lowercase() == me {
-            continue;
-        }
+    for e in active(entries, self_exe) {
         let name = friendly_app(&e.key);
         if !out.contains(&name) {
             out.push(name);
         }
     }
     out
+}
+
+pub fn filetime_to_unix_ms(ft: u64) -> u64 {
+    (ft / 10_000).saturating_sub(11_644_473_600_000)
+}
+
+/// Cel mai vechi început dintre folosirile active (ms unix).
+pub fn earliest_start(entries: &[Entry], self_exe: &str) -> Option<u64> {
+    active(entries, self_exe).map(|e| e.start).min().map(filetime_to_unix_ms)
 }
 
 /// Oglinda insulei folosește camera prin procesul WebView2; cât e deschisă, nu o raportăm.
@@ -103,13 +117,20 @@ fn read_entries(capability: &str) -> Vec<Entry> {
 pub fn spawn(app: AppHandle) {
     let me = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     std::thread::spawn(move || {
+        let _com = crate::platform::ComGuard::new(windows::Win32::System::Com::COINIT_MULTITHREADED);
+        let audio = crate::mic::enumerator();
         let mut last = Privacy::default();
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            let cur = if app.state::<SettingsState>().get().modules.privacy {
+            let m = app.state::<SettingsState>().get().modules;
+            let cur = if m.privacy || m.calls {
                 let mirror = app.state::<MirrorActive>().0.load(std::sync::atomic::Ordering::SeqCst);
+                let mic_entries = read_entries("microphone");
+                let mic = in_use(&mic_entries, &me);
                 Privacy {
-                    mic: in_use(&read_entries("microphone"), &me),
+                    mic_since: earliest_start(&mic_entries, &me),
+                    mic_muted: if mic.is_empty() { None } else { audio.as_ref().and_then(crate::mic::capture_mute) },
+                    mic,
                     cam: hide_own_mirror(in_use(&read_entries("webcam"), &me), mirror),
                 }
             } else {
@@ -160,6 +181,25 @@ mod tests {
         let cams = vec!["msedgewebview2".to_string(), "Zoom".to_string()];
         assert_eq!(hide_own_mirror(cams.clone(), true), vec!["Zoom".to_string()]);
         assert_eq!(hide_own_mirror(cams.clone(), false), cams);
+    }
+
+    #[test]
+    fn filetime_in_ms_unix() {
+        // 2024-01-01T00:00:00Z
+        assert_eq!(filetime_to_unix_ms(133_485_408_000_000_000), 1_704_067_200_000);
+        assert_eq!(filetime_to_unix_ms(5), 0); // valori absurde nu dau numere negative
+    }
+
+    #[test]
+    fn inceputul_folosirii_microfonului() {
+        let list = vec![
+            e("C:#Apps#Discord.exe", 133_485_408_100_000_000, 0),
+            e("C:#Apps#Teams.exe", 133_485_408_000_000_000, 0),
+            e("C:#Apps#Zoom.exe", 133_485_407_000_000_000, 133_485_407_500_000_000), // oprit
+            e("C:#Apps#dynamic-island.exe", 1, 0), // noi
+        ];
+        assert_eq!(earliest_start(&list, r"c:\apps\dynamic-island.exe"), Some(1_704_067_200_000));
+        assert_eq!(earliest_start(&list[2..3], ""), None);
     }
 
     #[test]

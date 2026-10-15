@@ -22,6 +22,10 @@
         <span class="c-icon" id="c-timer-icon"></span>
         <span class="c-time" id="c-timer-text"></span>
       </div>
+      <div class="c-slot c-call">
+        <button class="c-mic" id="c-mic"></button>
+        <span class="c-call-text" id="c-call-text"></span>
+      </div>
       <span class="dots" id="c-dots"><i class="dot mic"></i><i class="dot cam"></i></span>
     </div>
 
@@ -42,6 +46,13 @@
         <span class="t-icon" id="v-icon"></span>
         <div class="v-track"><div id="v-fill"></div></div>
         <span class="v-pct" id="v-pct"></span>
+      </div>
+      <div class="t-row t-shot">
+        <img id="s-thumb" alt="" />
+        <div class="t-text"><b data-i18n="shot.title"></b><span id="s-size"></span></div>
+        <button class="pill-btn" id="s-save" data-i18n="shot.save"></button>
+        <button class="pill-btn green" id="s-shelf" data-i18n="shot.shelf"></button>
+        <button class="s-close" id="s-close" aria-label="×">×</button>
       </div>
       <div class="t-row t-notif">
         <img id="n-icon" alt="" />
@@ -69,11 +80,11 @@
             <span id="x-rem">-0:00</span>
           </div>
           <div class="controls">
-            <button data-action="prev" aria-label="Anterior">
+            <button data-action="prev" data-i18n-aria="media.prev">
               <svg viewBox="0 0 28 20"><path d="M13 4.2v11.6L4 10z M25 4.2v11.6L16 10z" /></svg>
             </button>
-            <button data-action="play_pause" aria-label="Play/Pauză" id="x-play"></button>
-            <button data-action="next" aria-label="Următor">
+            <button data-action="play_pause" data-i18n-aria="media.play" id="x-play"></button>
+            <button data-action="next" data-i18n-aria="media.next">
               <svg viewBox="0 0 28 20"><path d="M3 4.2v11.6L12 10z M15 4.2v11.6L24 10z" /></svg>
             </button>
           </div>
@@ -86,7 +97,7 @@
         <div id="x-apps" class="apps"></div>
         <div id="x-update" class="update-row" hidden>
           <span id="x-update-text"></span>
-          <button id="x-update-apply">Aplică</button>
+          <button id="x-update-apply" data-i18n="update.apply"></button>
         </div>
       </div>
 

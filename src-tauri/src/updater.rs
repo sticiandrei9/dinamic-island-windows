@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+use crate::i18n::{t, tv};
 use crate::settings::SettingsState;
 
 /// Timeout pentru fiecare cerere a updater-ului (verificare și descărcare).
@@ -14,8 +15,21 @@ pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
 /// La pornire nu așteptăm mai mult de atât după server (insula trebuie să apară).
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub fn next_delay(first: bool) -> Duration {
-    if first { Duration::from_secs(30) } else { Duration::from_secs(6 * 3600) }
+/// Verificarea e datorată: prima la 30 s după pornire, apoi la 6 h după ultima, după ceasul real
+/// (un `sleep` de 6 h nu numără timpul în care laptopul doarme). Timpi în secunde unix.
+pub fn check_due(started: u64, last: Option<u64>, now: u64) -> bool {
+    match last {
+        None => now >= started + 30,
+        Some(l) => now < l || now >= l + 6 * 3600,
+    }
+}
+
+/// Descărcarea a eșuat: dacă un update e deja descărcat, rămâne gata de aplicat.
+pub fn after_failure(kept: Option<String>, msg: String, at: u64) -> UpdEvent {
+    match kept {
+        Some(v) => UpdEvent::Downloaded(v),
+        None => UpdEvent::Failed(msg, at),
+    }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -169,8 +183,8 @@ pub fn run_check(app: &AppHandle) {
         let _ = app
             .notification()
             .builder()
-            .title(format!("Dynamic Island v{version} e gata"))
-            .body("Click dreapta pe iconița din tray → Aplică update")
+            .title(tv("update.notifTitle", &version))
+            .body(t("update.notifBody"))
             .show();
         Ok(Some(version))
     });
@@ -179,7 +193,8 @@ pub fn run_check(app: &AppHandle) {
         Ok(Some(_)) => {}
         Err(e) => {
             log::warn!("verificarea update-urilor a eșuat: {e}");
-            transition(app, UpdEvent::Failed(e.to_string(), now_secs()));
+            let kept = app.state::<Updater>().ready.lock().unwrap().as_ref().map(|(u, _)| u.version.clone());
+            transition(app, after_failure(kept, e.to_string(), now_secs()));
         }
     }
 }
@@ -194,10 +209,12 @@ pub fn apply(app: &AppHandle) -> Result<(), String> {
     log::info!("aplic update-ul v{}", update.version);
     let _ = app.emit("update-installing", update.version.clone());
     crate::volume::restore_osd(); // installerul închide aplicația fără RunEvent::Exit
+    crate::tray::hide_icon(app);
     match update.install(&bytes) {
         Ok(()) => Ok(()),
         Err(e) => {
             log::warn!("instalarea a eșuat: {e}");
+            crate::tray::show_icon(app);
             let _ = app.emit("update-failed", ());
             // update-ul rămâne gata, ca „Aplică” să poată fi încercat din nou
             *app.state::<Updater>().ready.lock().unwrap() = Some((update, bytes));
@@ -242,10 +259,14 @@ pub fn spawn(app: AppHandle) {
         return;
     }
     std::thread::spawn(move || {
-        let mut first = true;
+        let started = now_secs();
+        let mut last: Option<u64> = None;
         loop {
-            std::thread::sleep(next_delay(first));
-            first = false;
+            std::thread::sleep(Duration::from_secs(if last.is_none() { 5 } else { 60 }));
+            if !check_due(started, last, now_secs()) {
+                continue;
+            }
+            last = Some(now_secs());
             if app.state::<SettingsState>().get().auto_update {
                 run_check(&app);
             }
@@ -327,8 +348,26 @@ mod tests {
     }
 
     #[test]
-    fn prima_verificare_la_30s_apoi_la_6h() {
-        assert_eq!(next_delay(true), Duration::from_secs(30));
-        assert_eq!(next_delay(false), Duration::from_secs(6 * 3600));
+    fn prima_verificare_la_30s_apoi_la_6h_dupa_ceas() {
+        let start = 1_000_000;
+        assert!(!check_due(start, None, start + 29));
+        assert!(check_due(start, None, start + 30));
+        let last = start + 30;
+        assert!(!check_due(start, Some(last), last + 6 * 3600 - 1));
+        assert!(check_due(start, Some(last), last + 6 * 3600));
+        // laptopul a dormit 8 ore: ora reală a trecut, verificarea e datorată imediat
+        assert!(check_due(start, Some(last), last + 8 * 3600));
+        // ceasul dat înapoi: verificăm, nu așteptăm zile
+        assert!(check_due(start, Some(last), last - 100));
+    }
+
+    #[test]
+    fn descarcare_esuata_pastreaza_updateul_gata() {
+        let s = next_state(&ready("0.3.0"), UpdEvent::Found("0.4.0".into()));
+        assert_eq!(next_state(&s, after_failure(Some("0.3.0".into()), "rețea".into(), 5)), ready("0.3.0"));
+        assert_eq!(
+            next_state(&UpdateState::Checking, after_failure(None, "rețea".into(), 5)),
+            UpdateState::Error { msg: "rețea".into(), checked_at: 5 }
+        );
     }
 }

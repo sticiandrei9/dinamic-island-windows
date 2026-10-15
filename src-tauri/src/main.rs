@@ -4,11 +4,14 @@ mod alerts;
 mod dev_demo;
 mod displays;
 mod hittest;
+mod i18n;
 mod lyrics;
 mod media;
+mod mic;
 mod notifications;
 mod platform;
 mod privacy;
+mod screenshot;
 mod settings;
 mod shelf;
 mod timer;
@@ -54,6 +57,7 @@ fn main() {
         .manage(lyrics::LyricsCache::default())
         .manage(privacy::MirrorActive::default())
         .manage(privacy::LastPrivacy::default())
+        .manage(screenshot::ScreenshotState::default())
         .invoke_handler(tauri::generate_handler![
             hittest::set_island_rect,
             media::media_control,
@@ -70,6 +74,9 @@ fn main() {
             shelf::shelf_drag_out,
             privacy::set_mirror_active,
             privacy::privacy_current,
+            mic::mic_set_mute,
+            screenshot::screenshot_save,
+            screenshot::screenshot_to_shelf,
             windows_list::list_windows,
             windows_list::focus_window,
             settings::get_settings,
@@ -92,6 +99,7 @@ fn main() {
                 settings::LoadNote::Missing => log::info!("settings.json lipsește; folosesc valorile implicite"),
                 settings::LoadNote::Loaded => {}
             }
+            i18n::set_current(loaded.lang());
             tray::sync_autostart(app.handle(), loaded.autostart);
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
             app.manage(shelf::ShelfState::load(app.path().app_config_dir()?.join("shelf.json")));
@@ -107,6 +115,7 @@ fn main() {
             dev_demo::spawn(app.handle().clone());
             volume::spawn(app.handle().clone());
             notifications::spawn(app.handle().clone());
+            screenshot::spawn(app.handle().clone());
             tray::setup(app)?;
             updater::spawn(app.handle().clone());
             if std::env::var_os("DI_OPEN_SETTINGS").is_some() {

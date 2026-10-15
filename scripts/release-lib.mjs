@@ -12,6 +12,8 @@ export function setVersion(fileName, text, version) {
   if (fileName.endsWith('.json')) {
     const obj = JSON.parse(text);
     obj.version = version;
+    // package-lock.json: și pachetul rădăcină
+    if (obj.packages?.['']) obj.packages[''].version = version;
     return JSON.stringify(obj, null, 2) + '\n';
   }
   // Cargo.toml: doar prima linie `version = "..."` (cea din [package])
@@ -28,7 +30,11 @@ export function builtInstaller(targetDir, version) {
   return `${targetDir}/release/bundle/nsis/Dynamic Island_${version}_x64-setup.exe`;
 }
 
-export const VERSION_FILES = ['package.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json'];
+export const VERSION_FILES = ['package.json', 'package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/tauri.conf.json'];
+
+export function checkBranch(branch) {
+  if (branch !== 'main') throw new Error(`release-ul se face doar de pe main (acum: ${branch})`);
+}
 
 // Ce rulezi ca să repari un release oprit la jumătate, în funcție de pasul care a eșuat.
 export function recoveryHint(stage, version, repo) {
@@ -39,7 +45,7 @@ export function recoveryHint(stage, version, repo) {
   if (stage === 'push') {
     return `Commit-ul și tag-ul v${version} există local. Termină publicarea (fără rebuild):\n  git push --atomic origin main v${version}\n  ${release}`;
   }
-  return `Codul și tag-ul sunt pe GitHub, dar release-ul nu. Creează-l:\n  ${release}`;
+  return `Codul și tag-ul sunt pe GitHub, dar release-ul nu e publicat. Dacă există ca ciornă:\n  gh release edit v${version} --draft=false --latest --repo ${repo}\naltfel creează-l:\n  ${release}`;
 }
 
 // Formatul `latest.json` citit de tauri-plugin-updater.

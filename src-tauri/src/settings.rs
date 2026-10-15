@@ -26,6 +26,8 @@ pub struct Modules {
     pub alerts: bool,
     pub volume: bool,
     pub notifications: bool,
+    pub calls: bool,
+    pub screenshots: bool,
     pub shelf: bool,
     pub mirror: bool,
 }
@@ -34,7 +36,7 @@ impl Default for Modules {
     fn default() -> Self {
         Self {
             media: true, lyrics: true, apps: true, timer: true, privacy: true,
-            alerts: true, volume: true, notifications: true, shelf: true, mirror: true,
+            alerts: true, volume: true, notifications: true, calls: true, screenshots: true, shelf: true, mirror: true,
         }
     }
 }
@@ -84,6 +86,9 @@ pub struct Settings {
     pub auto_update: bool,
     #[serde(deserialize_with = "lenient")]
     pub mirror_camera: Option<String>,
+    /// "auto" (după limba Windows), "ro", "en" sau "ru"
+    #[serde(deserialize_with = "lenient")]
+    pub language: String,
 }
 
 impl Default for Settings {
@@ -96,6 +101,7 @@ impl Default for Settings {
             autostart: true,
             auto_update: true,
             mirror_camera: None,
+            language: "auto".into(),
         }
     }
 }
@@ -143,20 +149,39 @@ impl SettingsState {
     }
 }
 
-#[tauri::command]
-pub fn get_settings(state: tauri::State<SettingsState>) -> Settings {
-    state.get()
+impl Settings {
+    /// Limba efectivă: cea aleasă sau, la „auto”, limba interfeței Windows.
+    pub fn lang(&self) -> crate::i18n::Lang {
+        crate::i18n::resolve(&self.language, crate::i18n::windows_ui_lang())
+    }
+}
+
+/// Setările trimise interfeței: plus limba efectivă (calculată, nu se salvează).
+pub fn payload(s: &Settings) -> serde_json::Value {
+    let mut v = serde_json::to_value(s).unwrap_or_default();
+    v["resolved_language"] = s.lang().code().into();
+    v
 }
 
 #[tauri::command]
-pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, settings: Settings) -> Result<(), String> {
-    settings.save(&state.path).map_err(|e| e.to_string())?;
-    let previous = std::mem::replace(&mut *state.current.lock().unwrap(), settings.clone());
-    if previous.autostart != settings.autostart {
-        crate::tray::apply_autostart(&app, settings.autostart);
-        crate::tray::refresh_autostart_item(&app, settings.autostart);
+pub fn get_settings(state: tauri::State<SettingsState>) -> serde_json::Value {
+    payload(&state.get())
+}
+
+#[tauri::command]
+pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, mut settings: Settings) -> Result<(), String> {
+    let previous = state.get();
+    if previous.autostart != settings.autostart && !crate::tray::apply_autostart(&app, settings.autostart) {
+        settings.autostart = previous.autostart; // Windows a refuzat: setarea rămâne cum era
     }
-    let _ = app.emit("settings-changed", &settings);
+    settings.save(&state.path).map_err(|e| e.to_string())?;
+    *state.current.lock().unwrap() = settings.clone();
+    crate::tray::refresh_autostart_item(&app, settings.autostart);
+    if previous.language != settings.language {
+        crate::i18n::set_current(settings.lang());
+        crate::tray::refresh_texts(&app);
+    }
+    let _ = app.emit("settings-changed", payload(&settings));
     // ferestrele se creează în afara thread-ului comenzii (crearea dintr-o comandă sincronă blochează)
     std::thread::spawn(move || crate::displays::sync_windows(&app));
     Ok(())
@@ -196,6 +221,20 @@ mod tests {
         assert_eq!(s.monitor, "primary");
         assert_eq!(s.size, Size::Normal);
         assert!(s.autostart && s.auto_update);
+        assert!(m.calls && m.screenshots);
+        assert_eq!(s.language, "auto");
+    }
+
+    #[test]
+    fn limba_efectiva_trimisa_interfetei() {
+        let mut s = Settings::default();
+        s.language = "ru".into();
+        let v = payload(&s);
+        assert_eq!(v["resolved_language"], "ru");
+        assert_eq!(v["language"], "ru");
+        // câmpul calculat nu strică citirea setărilor trimise înapoi de interfață
+        let back: Settings = serde_json::from_value(v).unwrap();
+        assert_eq!(back, s);
     }
 
     #[test]

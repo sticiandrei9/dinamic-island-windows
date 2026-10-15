@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateVersion, setVersion, assetName, manifest, recoveryHint, builtInstaller } from '../scripts/release-lib.mjs';
+import { validateVersion, setVersion, assetName, manifest, recoveryHint, builtInstaller, VERSION_FILES, checkBranch } from '../scripts/release-lib.mjs';
 
 test('installerul e căutat în folderul de compilare raportat de cargo', () => {
   assert.equal(builtInstaller('C:/Users/A/.cargo-target/di', '0.2.0'),
@@ -9,7 +9,7 @@ test('installerul e căutat în folderul de compilare raportat de cargo', () => 
 
 test('după un build eșuat, indicația readuce fișierele de versiune', () => {
   const h = recoveryHint('build', '0.2.0', 'u/r');
-  assert.match(h, /git checkout -- package\.json src-tauri\/Cargo\.toml src-tauri\/tauri\.conf\.json src-tauri\/Cargo\.lock/);
+  assert.match(h, /git checkout -- package\.json package-lock\.json src-tauri\/Cargo\.toml src-tauri\/tauri\.conf\.json src-tauri\/Cargo\.lock/);
 });
 
 test('după un push eșuat, indicația termină publicarea fără rebuild', () => {
@@ -40,6 +40,20 @@ test('setVersion modifică doar versiunea pachetului', () => {
   const json = '{\n  "name": "x",\n  "version": "0.1.0"\n}\n';
   assert.equal(JSON.parse(setVersion('package.json', json, '0.2.0')).version, '0.2.0');
   assert.ok(setVersion('package.json', json, '0.2.0').endsWith('\n'));
+});
+
+test('package-lock.json primește versiunea (sus și la pachetul rădăcină)', () => {
+  const lock = JSON.stringify({'name':'x','lockfileVersion':3,'packages':{'':{'name':'x'},'node_modules/a':{'version':'9.9.9'}}}, null, 2);
+  const out = JSON.parse(setVersion('package-lock.json', lock, '0.3.0'));
+  assert.equal(out.version, '0.3.0');
+  assert.equal(out.packages[''].version, '0.3.0');
+  assert.equal(out.packages['node_modules/a'].version, '9.9.9');
+  assert.ok(VERSION_FILES.includes('package-lock.json'));
+});
+
+test('release doar de pe main', () => {
+  assert.doesNotThrow(() => checkBranch('main'));
+  assert.throws(() => checkBranch('v030'), /main/);
 });
 
 test('numele asset-ului nu are spații', () => {

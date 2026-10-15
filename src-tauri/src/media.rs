@@ -168,41 +168,83 @@ impl MediaAction {
     }
 }
 
-/// Coperta e citită o dată pe piesă; dacă lipsește (Spotify o trimite cu întârziere), se reîncearcă.
+/// Coperta e citită la schimbarea piesei. Lipsă (Spotify o trimite cu întârziere) → se reîncearcă până la
+/// `give_up`; găsită → se mai recitește `refresh`, pentru că la început sursa poate trimite coperta piesei anterioare.
 pub struct ThumbCache {
     key: String,
     value: Option<String>,
-    tries: u32,
+    since: Instant,
     last_try: Option<Instant>,
     retry_every: Duration,
+    refresh: Duration,
+    give_up: Duration,
 }
 
 impl Default for ThumbCache {
     fn default() -> Self {
-        Self::with_retry(Duration::from_millis(1500))
+        Self::with_timing(Duration::from_millis(1500), Duration::from_secs(3), Duration::from_secs(30))
     }
 }
 
 impl ThumbCache {
-    pub fn with_retry(retry_every: Duration) -> Self {
-        Self { key: String::new(), value: None, tries: 0, last_try: None, retry_every }
+    pub fn with_timing(retry_every: Duration, refresh: Duration, give_up: Duration) -> Self {
+        Self { key: String::new(), value: None, since: Instant::now(), last_try: None, retry_every, refresh, give_up }
     }
 
     pub fn get(&mut self, key: &str, load: impl FnOnce() -> Option<String>) -> Option<String> {
         if self.key != key {
             self.key = key.to_string();
             self.value = None;
-            self.tries = 0;
+            self.since = Instant::now();
             self.last_try = None;
         }
+        let age = self.since.elapsed();
+        let window = if self.value.is_none() { self.give_up } else { self.refresh };
         let due = self.last_try.map_or(true, |t| t.elapsed() >= self.retry_every);
-        if self.value.is_none() && self.tries < 6 && due {
-            self.tries += 1;
+        if due && (age < window || self.last_try.is_none()) {
             self.last_try = Some(Instant::now());
-            self.value = load();
+            if let Some(v) = load() {
+                self.value = Some(v);
+            }
         }
         self.value.clone()
     }
+}
+
+/// Poziția pentru surse care nu raportează `LastUpdatedTime` (0): o extrapolăm din momentul în care
+/// am văzut valoarea raportată, altfel bara ar sări înapoi la fiecare citire.
+#[derive(Default)]
+pub struct PosClock {
+    seen: Option<(i64, i64)>,
+}
+
+impl PosClock {
+    pub fn position(&mut self, pos: i64, last_updated: i64, now: i64, playing: bool, end: i64) -> f64 {
+        if last_updated > 0 {
+            self.seen = None;
+            return live_position(pos, last_updated, now, playing, end);
+        }
+        let since = match self.seen {
+            Some((p, at)) if p == pos && playing => at,
+            _ => {
+                self.seen = Some((pos, now));
+                now
+            }
+        };
+        live_position(pos, since, now, playing, end)
+    }
+}
+
+/// Ce trimitem interfeței: coperta (base64, zeci de KB) doar când s-a schimbat față de ultima trimisă;
+/// câmpul lipsă înseamnă „aceeași”.
+pub fn media_payload(cur: &Option<MediaInfo>, sent_thumb: &Option<String>) -> serde_json::Value {
+    let mut v = serde_json::to_value(cur).unwrap_or_default();
+    if let (Some(c), Some(obj)) = (cur, v.as_object_mut()) {
+        if c.thumbnail.is_some() && c.thumbnail == *sent_thumb {
+            obj.remove("thumbnail");
+        }
+    }
+    v
 }
 
 /// Ultima stare emisă; interfața o cere la pornire, pentru că evenimentele trimise
@@ -286,7 +328,7 @@ fn read_thumbnail(props: &Props) -> Option<String> {
     read().ok()
 }
 
-fn read_session(session: &Session, cache: &mut ThumbCache) -> windows::core::Result<MediaInfo> {
+fn read_session(session: &Session, cache: &mut ThumbCache, clock: &mut PosClock) -> windows::core::Result<MediaInfo> {
     let props = await_op(session.TryGetMediaPropertiesAsync()?)?;
     let title = props.Title()?.to_string();
     let artist = props.Artist().map(|s| s.to_string()).unwrap_or_default();
@@ -299,7 +341,7 @@ fn read_session(session: &Session, cache: &mut ThumbCache) -> windows::core::Res
             let pos = tl.Position().map(|t| t.Duration).unwrap_or(0);
             let end = tl.EndTime().map(|t| t.Duration).unwrap_or(0);
             let upd = tl.LastUpdatedTime().map(|t| t.UniversalTime).unwrap_or(0);
-            (live_position(pos, upd, now_universal_ticks(), playing, end), end as f64 / TICKS_PER_SEC)
+            (clock.position(pos, upd, now_universal_ticks(), playing, end), end as f64 / TICKS_PER_SEC)
         }
         Err(_) => (0.0, 0.0),
     };
@@ -322,6 +364,8 @@ pub fn spawn(app: AppHandle) {
         let mut last_emit = Instant::now();
         let mut cache = ThumbCache::default();
         let mut prev_playing: HashSet<String> = HashSet::new();
+        let mut clock = PosClock::default();
+        let mut sent_thumb: Option<String> = None;
         loop {
             let manager = match request_manager() {
                 Ok(m) => m,
@@ -333,14 +377,25 @@ pub fn spawn(app: AppHandle) {
             };
             // managerul e re-creat la ~5 minute, ca să nu rămână blocat după restartul serviciului media
             for _ in 0..600 {
+                // modulul oprit: nu mai citim sesiunile (interfața cere starea când e repornit)
+                if !app.state::<crate::settings::SettingsState>().get().modules.media {
+                    if last.take().is_some() {
+                        store.set(None);
+                        let _ = app.emit("media-update", None::<MediaInfo>);
+                    }
+                    sent_thumb = None;
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
                 let displayed = last.as_ref().map(|m| m.aumid.clone());
                 let (session, now_playing) = pick_session(&manager, &prev_playing, displayed.as_deref());
                 prev_playing = now_playing;
-                let cur = session.and_then(|s| read_session(&s, &mut cache).ok());
+                let cur = session.and_then(|s| read_session(&s, &mut cache, &mut clock).ok());
                 let since = last_emit.elapsed().as_secs_f64();
                 if store.take_resync() || should_emit(&last, &cur, since) {
                     store.set(cur.clone());
-                    let _ = app.emit("media-update", cur.clone());
+                    let _ = app.emit("media-update", media_payload(&cur, &sent_thumb));
+                    sent_thumb = cur.as_ref().and_then(|c| c.thumbnail.clone());
                     last_emit = Instant::now();
                     last = cur;
                 }
@@ -389,7 +444,7 @@ pub async fn media_open_source(state: tauri::State<'_, LastMedia>) -> Result<(),
     tauri::async_runtime::spawn_blocking(move || {
         let windows = crate::windows_list::collect_all_windows();
         let hwnd = pick_source_window(&info.aumid, &info.title, &windows).ok_or("fereastra aplicației nu a fost găsită")?;
-        crate::windows_list::focus_window(hwnd)
+        crate::windows_list::focus_hwnd(hwnd)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -592,12 +647,63 @@ mod tests {
 
     #[test]
     fn coperta_reincercata_pana_apare() {
-        let mut c = ThumbCache::with_retry(Duration::ZERO);
+        let mut c = ThumbCache::with_timing(Duration::ZERO, Duration::ZERO, Duration::from_secs(60));
         assert_eq!(c.get("k1", || None), None);
+        assert_eq!(c.get("k1", || None), None);
+        assert_eq!(c.get("k1", || None), None);
+        assert_eq!(c.get("k1", || None), None);
+        assert_eq!(c.get("k1", || None), None);
+        assert_eq!(c.get("k1", || None), None);
+        // mai mult de 6 încercări: coperta care apare târziu tot e luată
         assert_eq!(c.get("k1", || Some("img".into())), Some("img".into()));
-        // cât timp piesa e aceeași, nu se mai citește
+        // după fereastra de reîmprospătare, cât timp piesa e aceeași, nu se mai citește
         assert_eq!(c.get("k1", || panic!("nu trebuia citită")), Some("img".into()));
         // piesă nouă → citire nouă
         assert_eq!(c.get("k2", || Some("img2".into())), Some("img2".into()));
+    }
+
+    #[test]
+    fn coperta_piesei_anterioare_e_inlocuita() {
+        // Spotify trimite întâi coperta veche pentru piesa nouă; în primele secunde recitim
+        let mut c = ThumbCache::with_timing(Duration::ZERO, Duration::from_secs(60), Duration::from_secs(60));
+        assert_eq!(c.get("nou", || Some("veche".into())), Some("veche".into()));
+        assert_eq!(c.get("nou", || Some("noua".into())), Some("noua".into()));
+        assert_eq!(c.get("nou", || None), Some("noua".into())); // o citire eșuată nu șterge coperta
+    }
+
+    #[test]
+    fn renunta_la_coperta_dupa_timp() {
+        let mut c = ThumbCache::with_timing(Duration::ZERO, Duration::ZERO, Duration::ZERO);
+        assert_eq!(c.get("k", || None), None);
+        assert_eq!(c.get("k", || panic!("nu mai încercăm")), None);
+    }
+
+    #[test]
+    fn pozitia_cand_sursa_nu_spune_momentul_actualizarii() {
+        let s = 10_000_000i64;
+        let mut pc = PosClock::default();
+        // LastUpdatedTime = 0: poziția raportată rămâne 10 s, dar piesa merge
+        assert_eq!(pc.position(10 * s, 0, 100 * s, true, 0), 10.0);
+        assert_eq!(pc.position(10 * s, 0, 103 * s, true, 0), 13.0);
+        // sursa raportează o poziție nouă → de acolo
+        assert_eq!(pc.position(14 * s, 0, 104 * s, true, 0), 14.0);
+        // pe pauză nu avansează
+        assert_eq!(pc.position(14 * s, 0, 110 * s, false, 0), 14.0);
+        // cu LastUpdatedTime valid, calculul obișnuit
+        assert_eq!(pc.position(10 * s, 100 * s, 103 * s, true, 0), 13.0);
+    }
+
+    #[test]
+    fn coperta_trimisa_doar_cand_se_schimba() {
+        let mut a = info("X", true, 1.0);
+        a.thumbnail = Some("data:img".into());
+        let v = media_payload(&Some(a.clone()), &None);
+        assert_eq!(v["thumbnail"], "data:img");
+        let v = media_payload(&Some(a.clone()), &Some("data:img".into()));
+        assert!(v.get("thumbnail").is_none()); // aceeași copertă: câmpul lipsește
+        assert_eq!(v["title"], "X");
+        a.thumbnail = None;
+        assert!(media_payload(&Some(a), &Some("data:img".into()))["thumbnail"].is_null()); // coperta a dispărut
+        assert!(media_payload(&None, &None).is_null());
     }
 }

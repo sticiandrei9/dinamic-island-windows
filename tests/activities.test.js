@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { layout, enqueue, advance, current } from '../src/lib/activities.js';
+import { layout, enqueue, advance, current, holdHead } from '../src/lib/activities.js';
 
 const media = { id: 'media', kind: 'media' };
 const timer = { id: 'timer', kind: 'timer' };
@@ -54,4 +54,21 @@ test('cel mult 3 notificări în așteptare; cele mai vechi se pierd', () => {
   let q = [];
   for (let i = 1; i <= 6; i++) q = enqueue(q, { kind: 'notification', title: `n${i}`, duration: 5000 }, 0);
   assert.deepEqual(q.map((a) => a.title), ['n1', 'n4', 'n5', 'n6']); // n1 e deja afișată
+});
+
+test('apelul are prioritate peste timer și media', () => {
+  const l = layout([{ kind: 'media' }, { kind: 'call' }, { kind: 'timer' }]);
+  assert.equal(l.pill.kind, 'call');
+  assert.equal(l.bubble.kind, 'timer');
+});
+
+test('tranzitoria interactivă nu expiră cât e ținută (cursorul pe ea)', () => {
+  let q = enqueue([], { kind: 'screenshot', duration: 6000, interactive: true }, 0);
+  q = holdHead(q, 5900);
+  q = holdHead(q, 9000);
+  assert.ok(current(advance(q, 10000), 10000), 'încă afișată după ce a fost ținută');
+  assert.equal(current(advance(q, 10600), 10600), null); // 1,5 s după ultima ținere
+  // una obișnuită nu e ținută
+  const a = enqueue([], { kind: 'alert', duration: 3000 }, 0);
+  assert.deepEqual(holdHead(a, 2900), a);
 });

@@ -116,6 +116,8 @@ pub fn sync_windows(app: &AppHandle) {
             placed.insert(label.clone(), geom);
         }
         if fresh {
+            // până raportează interfața dreptunghiul insulei, fereastra nu blochează click-urile
+            let _ = win.set_ignore_cursor_events(true);
             platform::make_no_activate(&win);
             let _ = platform::show_keep_focus(&win);
         }
@@ -128,6 +130,7 @@ pub fn sync_windows(app: &AppHandle) {
             .is_some_and(|i| i >= targets.len());
         if extra {
             placed.remove(&label);
+            app.state::<crate::hittest::IslandRects>().0.lock().unwrap().remove(&label);
             let _ = win.destroy();
         }
     }

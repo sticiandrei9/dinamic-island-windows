@@ -38,7 +38,8 @@ img { -webkit-user-drag: none; user-select: none; }
 #compact .c-slot { display: none; flex: 1; align-items: center; justify-content: space-between; min-width: 0; }
 #compact[data-kind="media"] .c-media,
 #compact[data-kind="timer"] .c-timer,
-#compact[data-kind="stopwatch"] .c-timer { display: flex; }
+#compact[data-kind="stopwatch"] .c-timer,
+#compact[data-kind="call"] .c-call { display: flex; }
 #compact .art { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; }
 #compact[data-kind=""] .dots { margin-left: auto; }
 body.expanded #compact, body.transient #compact { opacity: 0; filter: blur(6px); pointer-events: none; }
@@ -48,6 +49,15 @@ body.expanded #compact, body.transient #compact { opacity: 0; filter: blur(6px);
 .c-time { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.2px; }
 #compact[data-kind="timer"] .c-timer { color: var(--orange); }
 #compact[data-kind="stopwatch"] .c-timer { color: var(--green); }
+/* apelul: microfonul (buton de mute) + aplicația și durata */
+.c-mic { width: 24px; height: 24px; margin-left: -4px; border: 0; border-radius: 50%; background: rgba(255, 159, 10, .2); color: var(--orange); display: grid; place-items: center; cursor: pointer; transition: background .2s, transform .2s cubic-bezier(.2, 1.4, .4, 1); }
+.c-mic svg { width: 14px; height: 14px; }
+.c-mic:active { transform: scale(.88); }
+.c-mic:disabled { cursor: default; }
+body.mic-muted .c-mic { background: rgba(255, 69, 58, .22); color: var(--red); }
+.c-call-text { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--orange); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+body.mic-muted .c-call-text { color: var(--red); }
+#compact[data-kind="call"] .dot.mic { display: none; }
 body.timer-done #compact[data-kind="timer"] { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
 
@@ -87,7 +97,9 @@ body.transient #transient {
 #transient[data-kind="alert"] .t-alert,
 #transient[data-kind="update"] .t-alert,
 #transient[data-kind="volume"] .t-volume,
-#transient[data-kind="notification"] .t-notif { display: flex; }
+#transient[data-kind="notification"] .t-notif,
+#transient[data-kind="screenshot"] .t-shot { display: flex; }
+body.transient #transient[data-kind="screenshot"] { pointer-events: auto; }
 .t-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--t-color, var(--fg)); }
 .t-icon svg { width: 21px; height: 21px; }
 .t-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
@@ -111,6 +123,12 @@ body.transient #transient {
 #n-app { font-size: 11px; color: var(--fg2); }
 .t-notif .t-text b { font-size: 13.5px; margin-top: 1px; }
 .t-notif .t-text span#n-body { color: #d1d1d6; }
+
+/* captura de ecran: miniatura + Salvează / Pe raft */
+.t-shot { gap: 10px; padding: 0 12px 0 10px; }
+#s-thumb { height: 60px; max-width: 108px; border-radius: 10px; object-fit: cover; flex: none; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .2); }
+.t-shot .pill-btn { flex: none; padding: 5px 10px; }
+.s-close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: var(--fg2); font-size: 14px; line-height: 22px; cursor: pointer; }
 
 /* ---------- extins ---------- */
 #expanded {

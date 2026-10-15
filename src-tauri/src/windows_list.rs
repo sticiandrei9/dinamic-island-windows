@@ -11,7 +11,7 @@ use windows::Win32::Graphics::Gdi::{
     DIB_RGB_COLORS, HDC,
 };
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::COINIT_APARTMENTTHREADED;
 use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentProcessId, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION,
@@ -201,8 +201,17 @@ pub fn file_icon(path: &str) -> Option<String> {
     } else {
         format!("*.{ext}")
     };
-    let mut cache = icon_cache().lock().unwrap();
-    cache.entry(key).or_insert_with(|| unsafe { load_icon(path) }).clone()
+    cached_icon(key, || unsafe { load_icon(path) })
+}
+
+/// Iconița din cache sau încărcată acum; lock-ul nu e ținut cât rulează `SHGetFileInfo` (poate dura).
+fn cached_icon(key: String, load: impl FnOnce() -> Option<String>) -> Option<String> {
+    if let Some(v) = icon_cache().lock().unwrap().get(&key) {
+        return v.clone();
+    }
+    let v = load();
+    icon_cache().lock().unwrap().insert(key, v.clone());
+    v
 }
 
 /// Numele exe-ului unui proces („ShellExperienceHost.exe”), sau gol dacă nu poate fi citit.
@@ -218,8 +227,8 @@ fn icon_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 /// Toate ferestrele de aplicații, câte una pe fereastră (fără gruparea pe exe).
 pub fn collect_all_windows() -> Vec<AppWindow> {
     let mut out = Vec::new();
+    let _com = crate::platform::ComGuard::new(COINIT_APARTMENTTHREADED);
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let own = GetCurrentProcessId();
         for h in top_level_windows() {
             if !IsWindowVisible(h).as_bool() {
@@ -231,12 +240,7 @@ pub fn collect_all_windows() -> Vec<AppWindow> {
             }
             let path = exe_path(pid).unwrap_or_default();
             let exe = path.rsplit('\\').next().unwrap_or("").to_string();
-            let icon = if path.is_empty() {
-                None
-            } else {
-                let mut cache = icon_cache().lock().unwrap();
-                cache.entry(path.clone()).or_insert_with(|| load_icon(&path)).clone()
-            };
+            let icon = if path.is_empty() { None } else { cached_icon(path.clone(), || load_icon(&path)) };
             out.push(AppWindow { hwnd: h.0 as isize, title: c.title, exe, icon });
         }
     }
@@ -252,8 +256,13 @@ pub async fn list_windows() -> Vec<AppWindow> {
     tauri::async_runtime::spawn_blocking(collect_windows).await.unwrap_or_default()
 }
 
+/// Click pe iconița unei aplicații; rulează în afara thread-ului principal (`AttachThreadInput` poate aștepta).
 #[tauri::command]
-pub fn focus_window(hwnd: isize) -> Result<(), String> {
+pub async fn focus_window(hwnd: isize) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || focus_hwnd(hwnd)).await.map_err(|e| e.to_string())?
+}
+
+pub fn focus_hwnd(hwnd: isize) -> Result<(), String> {
     unsafe {
         let h = HWND(hwnd as *mut core::ffi::c_void);
         if !IsWindow(h).as_bool() {

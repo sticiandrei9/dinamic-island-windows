@@ -1,3 +1,4 @@
+import { t } from './lib/i18n.js';
 import { formatTime, currentPosition, dominantColor, seekFromPointer } from './lib/util.js';
 
 const PLAY = '<svg viewBox="0 0 20 20"><path d="M5.5 3.3v13.4c0 .8.9 1.3 1.6.9l10.6-6.7c.6-.4.6-1.3 0-1.7L7.1 2.4c-.7-.4-1.6.1-1.6.9z"/></svg>';
@@ -72,6 +73,8 @@ export class MediaView {
 
   update(info) {
     const prev = this.info;
+    // Rust omite coperta când e aceeași ca la trimiterea anterioară
+    if (info && !('thumbnail' in info)) info = { ...info, thumbnail: prev?.thumbnail ?? null };
     this.info = info;
     this.receivedAt = performance.now();
     document.body.classList.toggle('has-media', !!info);
@@ -79,7 +82,7 @@ export class MediaView {
     if (info) {
       const trackChanged = !prev || prev.title !== info.title || prev.artist !== info.artist;
       if (trackChanged) {
-        this.setText($('x-title'), info.title || 'Necunoscut');
+        this.setText($('x-title'), info.title || t('media.unknown'));
         this.setText($('x-artist'), info.artist || info.source || '');
       }
       if (!prev || prev.thumbnail !== info.thumbnail) this.setArt(info.thumbnail || PLACEHOLDER);

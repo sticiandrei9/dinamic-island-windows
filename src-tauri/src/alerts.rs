@@ -9,6 +9,7 @@ use windows::Foundation::Collections::IIterable;
 use windows::Foundation::IReference;
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 
+use crate::i18n::t;
 use crate::media::await_op_for;
 use crate::settings::SettingsState;
 
@@ -43,14 +44,14 @@ pub fn power_transition(prev: Option<&Power>, cur: &Power) -> Option<Alert> {
     let pct = format!("{}%", cur.percent);
     let level = Some(cur.percent as f64 / 100.0);
     if cur.ac && !prev.ac {
-        return Some(alert("bolt", "Se încarcă", pct, "var(--green)", level));
+        return Some(alert("bolt", &t("alert.charging"), pct, "var(--green)", level));
     }
     if !cur.ac && prev.ac {
-        return Some(alert("battery", "Pe baterie", pct, "var(--fg)", level));
+        return Some(alert("battery", &t("alert.onBattery"), pct, "var(--fg)", level));
     }
     let crossed = |t: u8| prev.percent > t && cur.percent <= t;
     if !cur.ac && (crossed(20) || crossed(10)) {
-        return Some(alert("battery", "Baterie scăzută", pct, "var(--red)", level));
+        return Some(alert("battery", &t("alert.lowBattery"), pct, "var(--red)", level));
     }
     None
 }
@@ -89,13 +90,13 @@ pub fn bt_transition(prev: Option<&[BtDevice]>, cur: &[BtDevice]) -> Vec<Alert> 
     let mut out = Vec::new();
     for d in cur.iter().filter(|d| !prev.iter().any(|p| p.id == d.id)) {
         let detail = match d.battery {
-            Some(b) => format!("Conectat · {b}%"),
-            None => "Conectat".into(),
+            Some(b) => format!("{} · {b}%", t("alert.connected")),
+            None => t("alert.connected"),
         };
         out.push(alert(&d.kind, &d.name, detail, "var(--fg)", d.battery.map(|b| b as f64 / 100.0)));
     }
     for d in prev.iter().filter(|p| !cur.iter().any(|d| d.id == p.id)) {
-        out.push(alert(&d.kind, &d.name, "Deconectat".into(), "var(--fg2)", None));
+        out.push(alert(&d.kind, &d.name, t("alert.disconnected"), "var(--fg2)", None));
     }
     out
 }

@@ -2,7 +2,7 @@
 // Persistente (timer, media): concurează pentru pastilă; a doua apare ca bulă.
 // Tranzitorii (alertă, volum, notificare, update): o coadă, afișate pe rând, fiecare `duration` ms.
 
-const PRIORITY = { timer: 3, stopwatch: 3, media: 2 };
+const PRIORITY = { call: 4, timer: 3, stopwatch: 3, media: 2 };
 
 export function layout(persistent) {
   const sorted = [...persistent].sort((a, b) => (PRIORITY[b.kind] ?? 0) - (PRIORITY[a.kind] ?? 0));
@@ -38,4 +38,12 @@ export function advance(queue, now) {
 export function current(queue, now) {
   const head = queue[0];
   return head && head.startedAt + head.duration > now ? head : null;
+}
+
+// Cât cursorul e pe o tranzitorie interactivă (captura cu butoane), ea nu expiră:
+// rămân cel puțin `keepMs` după ultima ținere.
+export function holdHead(queue, now, keepMs = 1500) {
+  const head = queue[0];
+  if (!head?.interactive || head.startedAt + head.duration >= now + keepMs) return queue;
+  return [{ ...head, startedAt: now + keepMs - head.duration }, ...queue.slice(1)];
 }

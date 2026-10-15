@@ -129,7 +129,13 @@ pub fn shelf_open(path: String) -> Result<(), String> {
 /// Arată fișierul selectat în Explorer.
 #[tauri::command]
 pub fn shelf_reveal(path: String) -> Result<(), String> {
-    std::process::Command::new("explorer").arg(format!("/select,{path}")).spawn().map(|_| ()).map_err(|e| e.to_string())
+    use std::os::windows::process::CommandExt;
+    // explorer nu înțelege ghilimelele puse automat de Command; o cale cu virgulă trebuie pusă între ghilimele de noi
+    std::process::Command::new("explorer").raw_arg(select_arg(&path)).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+pub fn select_arg(path: &str) -> String {
+    format!("/select,\"{path}\"")
 }
 
 /// Trage fișierul de pe raft în altă aplicație (drag nativ OLE, pe thread-ul principal).
@@ -154,6 +160,11 @@ mod tests {
 
     fn paths(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn selectie_in_explorer_cu_virgula_in_cale() {
+        assert_eq!(select_arg(r"C:\Poze\Vacanță, 2026\a.jpg"), r#"/select,"C:\Poze\Vacanță, 2026\a.jpg""#);
     }
 
     #[test]

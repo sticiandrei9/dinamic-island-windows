@@ -124,7 +124,8 @@ impl Cache {
 #[derive(Default)]
 pub struct LyricsCache(pub Mutex<Cache>);
 
-fn fetch(t: &Track) -> Option<Vec<Line>> {
+/// Ok(None) = LRCLIB nu are versuri; Err = rețeaua a eșuat.
+fn fetch(t: &Track) -> Result<Option<Vec<Line>>, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(8))
         .user_agent(&format!(
@@ -132,28 +133,53 @@ fn fetch(t: &Track) -> Option<Vec<Line>> {
             env!("CARGO_PKG_VERSION")
         ))
         .build();
-    let direct = agent.get(&get_url(t)).call().ok().and_then(|r| r.into_json::<Found>().ok());
+    // un răspuns HTTP de eroare (404 = piesă necunoscută) e „fără versuri”; doar lipsa rețelei e eroare
+    let get = |url: &str| match agent.get(url).call() {
+        Ok(r) => Ok(Some(r)),
+        Err(ureq::Error::Status(..)) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    };
+    let direct = get(&get_url(t))?.and_then(|r| r.into_json::<Found>().ok());
     if let Some(lines) = direct.and_then(|f| f.synced).map(|s| parse_lrc(&s)).filter(|l| usable(l)) {
-        return Some(lines);
+        return Ok(Some(lines));
     }
-    let results: Vec<Found> = agent.get(&search_url(t)).call().ok()?.into_json().ok()?;
-    Some(parse_lrc(pick_result(&results, t.duration)?.synced.as_deref()?))
+    let Some(r) = get(&search_url(t))? else { return Ok(None) };
+    let results: Vec<Found> = r.into_json().unwrap_or_default();
+    Ok(pick_result(&results, t.duration).and_then(|f| f.synced.as_deref()).map(parse_lrc))
+}
+
+/// Răspunsurile (inclusiv „fără versuri”) se memorează; erorile de rețea nu, ca piesa să fie cerută din nou.
+pub fn remember(cache: &mut Cache, key: String, result: &Result<Option<Vec<Line>>, String>) {
+    if let Ok(v) = result {
+        cache.put(key, v.clone());
+    }
 }
 
 /// Versurile sincronizate ale piesei, din cache sau de pe LRCLIB. None = nu există / fără rețea.
 #[tauri::command]
-pub async fn get_lyrics(track: Track, state: tauri::State<'_, LyricsCache>) -> Result<Option<Vec<Line>>, String> {
+pub async fn get_lyrics(app: tauri::AppHandle, track: Track) -> Result<Option<Vec<Line>>, String> {
+    use tauri::Manager;
     if track.title.trim().is_empty() || track.artist.trim().is_empty() || !(track.duration > 0.0) {
         return Ok(None);
     }
     let key = format!("{}|{}|{}", track.artist, track.title, track.duration.round() as i64);
-    if let Some(hit) = state.0.lock().unwrap().get(&key) {
+    if let Some(hit) = app.state::<LyricsCache>().0.lock().unwrap().get(&key) {
         return Ok(hit.clone());
     }
-    let found = tauri::async_runtime::spawn_blocking(move || fetch(&track)).await.map_err(|e| e.to_string())?;
-    log::debug!("versuri: {} rânduri", found.as_ref().map_or(0, |l| l.len()));
-    state.0.lock().unwrap().put(key, found.clone());
-    Ok(found)
+    tauri::async_runtime::spawn_blocking(move || {
+        // o cerere pe rând: fiecare insulă (monitor) cere aceeași piesă; a doua o găsește în cache
+        static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hit) = app.state::<LyricsCache>().0.lock().unwrap().get(&key) {
+            return Ok(hit.clone());
+        }
+        let found = fetch(&track);
+        log::debug!("versuri: {:?}", found.as_ref().map(|v| v.as_ref().map_or(0, |l| l.len())));
+        remember(&mut app.state::<LyricsCache>().0.lock().unwrap(), key, &found);
+        found
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -217,6 +243,15 @@ mod tests {
     }
 
     #[test]
+    fn eroarea_de_retea_nu_se_memoreaza() {
+        let mut c = Cache::default();
+        remember(&mut c, "a".into(), &Err("timeout".into()));
+        assert!(c.get("a").is_none()); // se reîncearcă data viitoare
+        remember(&mut c, "b".into(), &Ok(None));
+        assert_eq!(c.get("b"), Some(&None)); // „fără versuri” e un răspuns, se memorează
+    }
+
+    #[test]
     fn cache_limitat() {
         let mut c = Cache::default();
         for i in 0..60 {
@@ -231,7 +266,7 @@ mod tests {
     #[ignore]
     fn cerere_reala_lrclib() {
         let t = Track { title: "Never Gonna Give You Up".into(), artist: "Rick Astley".into(), album: "".into(), duration: 213.0 };
-        let lines = fetch(&t);
+        let lines = fetch(&t).expect("rețea");
         println!("rânduri: {:?}", lines.as_ref().map(|l| l.len()));
         if let Some(l) = lines {
             for x in l.iter().take(3) {

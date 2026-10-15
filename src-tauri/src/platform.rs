@@ -11,6 +11,24 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE,
 };
 
+/// COM inițializat pe thread-ul curent cât trăiește garda; `CoUninitialize` doar dacă inițializarea a reușit
+/// (inclusiv S_FALSE = era deja inițializat în același mod).
+pub struct ComGuard(bool);
+
+impl ComGuard {
+    pub fn new(mode: windows::Win32::System::Com::COINIT) -> Self {
+        Self(unsafe { windows::Win32::System::Com::CoInitializeEx(None, mode) }.is_ok())
+    }
+}
+
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { windows::Win32::System::Com::CoUninitialize() };
+        }
+    }
+}
+
 /// HWND-ul ferestrei Tauri, convertit în tipul din crate-ul nostru `windows`.
 pub fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
     win.hwnd().ok().map(|h| HWND(h.0 as *mut core::ffi::c_void))

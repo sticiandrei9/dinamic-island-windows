@@ -3,6 +3,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt;
 
+use crate::i18n::{t, tv};
 use crate::settings::SettingsState;
 use crate::updater::{self, UpdateState};
 
@@ -10,15 +11,17 @@ use crate::updater::{self, UpdateState};
 pub struct TrayItems {
     update: MenuItem<tauri::Wry>,
     autostart: CheckMenuItem<tauri::Wry>,
+    settings: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
 }
 
 /// Textul și starea rândului de update din tray.
 pub fn update_item_label(state: &UpdateState) -> (String, bool) {
     match state {
-        UpdateState::Ready { version } => (format!("Aplică update v{version}"), true),
-        UpdateState::Checking => ("Se verifică actualizările…".into(), false),
-        UpdateState::Downloading { version } => (format!("Se descarcă v{version}…"), false),
-        _ => ("Verifică actualizări".into(), true),
+        UpdateState::Ready { version } => (tv("tray.apply", version), true),
+        UpdateState::Checking => (t("tray.checking"), false),
+        UpdateState::Downloading { version } => (tv("tray.downloading", version), false),
+        _ => (t("tray.check"), true),
     }
 }
 
@@ -26,14 +29,14 @@ pub fn setup(app: &App) -> tauri::Result<()> {
     let version = MenuItem::with_id(app, "version", format!("Dynamic Island {}", app.package_info().version), false, None::<&str>)?;
     let (label, enabled) = update_item_label(&UpdateState::Idle);
     let update = MenuItem::with_id(app, "update", label, enabled, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Setări…", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", t("tray.settings"), true, None::<&str>)?;
     let wanted = app.state::<SettingsState>().get().autostart;
-    let autostart = CheckMenuItem::with_id(app, "autostart", "Pornește cu Windows", true, wanted, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Ieșire", true, None::<&str>)?;
+    let autostart = CheckMenuItem::with_id(app, "autostart", t("tray.autostart"), true, wanted, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", t("tray.quit"), true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&version, &update, &sep1, &settings, &autostart, &sep2, &quit])?;
-    app.manage(TrayItems { update, autostart });
+    app.manage(TrayItems { update, autostart, settings, quit });
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("iconița aplicației lipsește"))
@@ -55,14 +58,14 @@ pub fn setup(app: &App) -> tauri::Result<()> {
             "autostart" => {
                 let state = app.state::<SettingsState>();
                 let mut s = state.get();
-                s.autostart = !s.autostart;
-                let _ = s.save(&state.path);
-                *state.current.lock().unwrap() = s.clone();
-                apply_autostart(app, s.autostart);
-                if let Some(items) = app.try_state::<TrayItems>() {
-                    let _ = items.autostart.set_checked(s.autostart);
+                // Windows a refuzat: bifa și setarea rămân cum erau
+                if apply_autostart(app, !s.autostart) {
+                    s.autostart = !s.autostart;
+                    let _ = s.save(&state.path);
+                    *state.current.lock().unwrap() = s.clone();
                 }
-                let _ = app.emit("settings-changed", &s);
+                refresh_autostart_item(app, s.autostart);
+                let _ = app.emit("settings-changed", crate::settings::payload(&s));
             }
             _ => {}
         })
@@ -75,6 +78,29 @@ pub fn refresh_update_item(app: &AppHandle, state: &UpdateState) {
         let (label, enabled) = update_item_label(state);
         let _ = items.update.set_text(label);
         let _ = items.update.set_enabled(enabled);
+    }
+}
+
+/// După schimbarea limbii: textele meniului din tray.
+pub fn refresh_texts(app: &AppHandle) {
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let _ = items.settings.set_text(t("tray.settings"));
+        let _ = items.autostart.set_text(t("tray.autostart"));
+        let _ = items.quit.set_text(t("tray.quit"));
+    }
+    refresh_update_item(app, &updater::current_state(app));
+}
+
+/// Înainte ca installerul să închidă aplicația: altfel iconița rămâne în tray până treci cu mouse-ul peste ea.
+pub fn hide_icon(app: &AppHandle) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_visible(false);
+    }
+}
+
+pub fn show_icon(app: &AppHandle) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_visible(true);
     }
 }
 
@@ -96,7 +122,7 @@ pub fn open_settings(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let built = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
-            .title("Setări — Dynamic Island")
+            .title(t("settings.title"))
             .inner_size(520.0, 640.0)
             .min_inner_size(440.0, 480.0)
             .center()
@@ -113,17 +139,23 @@ pub fn sync_autostart(app: &AppHandle, wanted: bool) {
         return;
     }
     if app.autolaunch().is_enabled().unwrap_or(!wanted) != wanted {
-        apply_autostart(app, wanted);
+        let _ = apply_autostart(app, wanted);
     }
 }
 
-/// Aplică setarea „Pornește cu Windows” în registru (doar în build-ul release).
-pub fn apply_autostart(app: &AppHandle, on: bool) {
+/// Aplică setarea „Pornește cu Windows” în registru (doar în build-ul release). Întoarce false dacă Windows a refuzat.
+pub fn apply_autostart(app: &AppHandle, on: bool) -> bool {
     if cfg!(debug_assertions) {
-        return;
+        return true;
     }
     let al = app.autolaunch();
-    let _ = if on { al.enable() } else { al.disable() };
+    match if on { al.enable() } else { al.disable() } {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("autostart: nu pot {} pornirea cu Windows: {e}", if on { "activa" } else { "dezactiva" });
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -132,6 +164,7 @@ mod tests {
 
     #[test]
     fn textul_butonului_de_update() {
+        crate::i18n::set_current(crate::i18n::Lang::Ro);
         assert_eq!(update_item_label(&UpdateState::Ready { version: "0.3.0".into() }), ("Aplică update v0.3.0".into(), true));
         assert_eq!(update_item_label(&UpdateState::Idle), ("Verifică actualizări".into(), true));
         assert_eq!(update_item_label(&UpdateState::UpToDate { checked_at: 1 }).1, true);

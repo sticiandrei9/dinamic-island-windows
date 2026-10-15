@@ -42,6 +42,7 @@ struct WinState {
     hidden: bool,
     geo: (i32, i32, f64),
     geo_at: Option<Instant>,
+    visible_sent: Option<Instant>,
 }
 
 /// Un singur thread pentru toate insulele: (1) fereastra e transparentă la click în afara insulei,
@@ -77,9 +78,14 @@ pub fn spawn(app: AppHandle) {
                 }
 
                 let hidden = fs_mon.is_some_and(|m| on_monitor((st.geo.0, st.geo.1), m));
+                // retrimis la 2 s: o fereastră abia creată poate să nu fi ascultat încă
+                let resend = st.visible_sent.map_or(true, |t| t.elapsed() > Duration::from_secs(2));
+                if hidden != st.hidden || resend {
+                    st.visible_sent = Some(Instant::now());
+                    let _ = app.emit_to(label.as_str(), "island-visible", !hidden);
+                }
                 if hidden != st.hidden {
                     st.hidden = hidden;
-                    let _ = app.emit_to(label.as_str(), "island-visible", !hidden);
                     if hidden {
                         let _ = win.set_ignore_cursor_events(true);
                         st.inside = Some(false);

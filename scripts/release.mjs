@@ -4,7 +4,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { validateVersion, setVersion, assetName, manifest, recoveryHint, builtInstaller, VERSION_FILES } from './release-lib.mjs';
+import { validateVersion, setVersion, assetName, manifest, recoveryHint, builtInstaller, VERSION_FILES, checkBranch } from './release-lib.mjs';
 
 const REPO = 'sticiandrei9/dinamic-island-windows';
 const KEY = join(homedir(), '.tauri', 'dynamic-island.key');
@@ -25,6 +25,7 @@ function fail(stage, err) {
 if (!localUrl && execSync('git status --porcelain').toString().trim()) {
   throw new Error('working tree-ul nu e curat; fă commit întâi');
 }
+if (!localUrl) checkBranch(execSync('git rev-parse --abbrev-ref HEAD').toString().trim());
 const current = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')).version;
 validateVersion(version, current);
 
@@ -54,7 +55,8 @@ const latest = manifest({ version, notes, pubDate: new Date().toISOString(), sig
 writeFileSync(`${OUT}/latest.json`, JSON.stringify(latest, null, 2) + '\n');
 
 if (localUrl) {
-  console.log(`\nBuild semnat în ${OUT}/ (nepublicat). Fișierele de versiune au fost modificate, nu sunt în commit.`);
+  git('checkout', '--', ...VERSION_FILES, 'src-tauri/Cargo.lock');
+  console.log(`\nBuild semnat în ${OUT}/ (nepublicat). Fișierele de versiune au fost readuse.`);
   process.exit(0);
 }
 
@@ -67,8 +69,10 @@ try {
   fail('push', err);
 }
 try {
-  execFileSync('gh', ['release', 'create', `v${version}`, asset, `${OUT}/latest.json`,
+  // ciornă cu toate fișierele, apoi publicată: `/releases/latest` nu e niciodată fără latest.json
+  execFileSync('gh', ['release', 'create', `v${version}`, asset, `${OUT}/latest.json`, '--draft',
     '--repo', REPO, '--title', `v${version}`, '--notes', notes || `Versiunea ${version}`], { stdio: 'inherit' });
+  execFileSync('gh', ['release', 'edit', `v${version}`, '--draft=false', '--latest', '--repo', REPO], { stdio: 'inherit' });
 } catch (err) {
   fail('release', err);
 }

@@ -42,7 +42,10 @@ export function init(island) {
   let current = null;
   let idle = 0;
 
-  function message(text, withIcon) {
+  let msgKey = null;
+  function message(key, withIcon) {
+    msgKey = key;
+    const text = t(key);
     msg.replaceChildren();
     if (withIcon) {
       const i = document.createElement('div');
@@ -64,7 +67,7 @@ export function init(island) {
 
   function armIdle() {
     clearTimeout(idle);
-    idle = setTimeout(() => { stop(); message(t('mirror.idle'), true); }, IDLE_MS);
+    idle = setTimeout(() => { stop(); message('mirror.idle', true); }, IDLE_MS);
   }
 
   let gen = 0;
@@ -80,13 +83,14 @@ export function init(island) {
       video.srcObject = stream;
       invoke('set_mirror_active', { active: true }).catch(() => {});
       box.classList.remove('off');
+      msgKey = null; // camera merge: niciun mesaj de refăcut
       current = stream.getVideoTracks()[0]?.getSettings().deviceId ?? deviceId;
       cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
       box.classList.toggle('multi', cams.length > 1);
       armIdle();
     } catch (e) {
       stop();
-      message(t('mirror.unavailable'), true);
+      message('mirror.unavailable', true);
     }
   }
 
@@ -104,6 +108,9 @@ export function init(island) {
     if (island.settings) invoke('set_settings', { settings: { ...island.settings, mirror_camera: id } }).catch(() => {});
     start(id);
   });
+
+  // limba schimbată: mesajul afișat se reface
+  window.addEventListener('island-settings', () => { if (msgKey) message(msgKey, true); });
 
   island.registerPane('mirror', { module: 'mirror', icon: ICONS.mirror, title: 'tab.mirror', onShow: show, onHide: stop });
 }

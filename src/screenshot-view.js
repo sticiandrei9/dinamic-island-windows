@@ -12,8 +12,8 @@ export function init(island) {
       if (shot?.kind !== 'screenshot') return;
       island.dropTransients('screenshot');
       invoke(command, { id: shot.id })
-        .then(() => island.pushTransient({ kind: 'alert', icon: command === 'screenshot_to_shelf' ? 'shelf' : 'download', title: t(doneKey), color: 'var(--green)', duration: 1800 }))
-        .catch((err) => island.pushTransient({ kind: 'alert', icon: 'bell', title: t('shot.failed'), detail: t(String(err)), color: 'var(--red)', duration: 3000 }));
+        .then(() => island.pushTransient({ kind: 'alert', icon: command === 'screenshot_to_shelf' ? 'shelf' : 'download', title: t(doneKey), color: 'var(--green)', duration: 1800, urgent: true }))
+        .catch((err) => island.pushTransient({ kind: 'alert', icon: 'bell', title: t('shot.failed'), detail: t(String(err)), color: 'var(--red)', duration: 3000, urgent: true }));
     };
   }
 

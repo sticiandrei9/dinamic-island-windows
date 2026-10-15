@@ -73,7 +73,7 @@ export function init(island) {
   // după un timer terminat, un click pe pastilă oprește pulsarea
   document.getElementById('compact').addEventListener('click', () => clock.finished && cmd('dismiss'));
 
-  island.registerPane('timer', { module: 'timer', icon: ICONS.timer, title: 'tab.timer', onShow: render });
+  island.registerPane('timer', { module: 'timer', icon: ICONS.timer, title: 'tab.timer', onShow: () => { if (clock.finished) cmd('dismiss'); render(); } });
 
   // ---------- randare ----------
   function render() {
@@ -95,7 +95,7 @@ export function init(island) {
     swStart.textContent = t(sw?.started_at != null ? 'timer.pause' : sw ? 'timer.resume' : 'timer.start');
     swLap.disabled = sw?.started_at == null;
     swReset.disabled = !sw;
-    laps.replaceChildren(...(sw?.laps ?? []).map((l, i) => el('span', '', t('sw.lapItem', { n: i + 1, v: formatStopwatch(l) }))));
+    laps.replaceChildren(...(sw?.laps ?? []).map((l, i) => el('span', '', t('sw.lapItem', { n: (sw.lap_total ?? sw.laps.length) - sw.laps.length + i + 1, v: formatStopwatch(l) }))));
 
     // textul din pastilă, pentru activitatea care o ocupă
     const kind = document.getElementById('compact').dataset.kind;

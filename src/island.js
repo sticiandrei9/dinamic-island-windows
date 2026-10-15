@@ -1,7 +1,7 @@
 import { Spring } from './lib/spring.js';
 import { islandPath, islandRect } from './lib/shape.js';
 import { sizeScale } from './lib/util.js';
-import { layout, enqueue, advance, current, holdHead, drop } from './lib/activities.js';
+import { layout, enqueue, advance, current, holdHead, drop, pauseHead } from './lib/activities.js';
 import { ICONS, speakerIcon } from './icons.js';
 import { MediaView } from './media-view.js';
 import { AppsView } from './apps-view.js';
@@ -48,6 +48,10 @@ let lastFrame = 0;
 let rect = { x: 0, y: 0, w: 0, h: 0 };
 let lastRectKey = '';
 let zoom = 1;
+let bubbleLeft = Infinity; // marginea stângă a bulei (px CSS), pentru hover pe bulă
+let pointerX = 0;
+let uidSeq = 0; // identitatea tranzitoriilor (holdHead/pauseHead creează obiecte noi)
+let updateVersion = null; // update gata de aplicat (pentru textul refăcut la schimbarea limbii)
 let expandOnHover = true;
 let settings = null;
 let wasMediaOff = false;
@@ -72,7 +76,7 @@ export const island = {
     renderActivities();
   },
   pushTransient(activity) {
-    queue = enqueue(advance(queue, performance.now()), activity, performance.now());
+    queue = enqueue(advance(queue, performance.now()), { ...activity, uid: ++uidSeq }, performance.now());
     tickTransient();
   },
   dropTransients(kind) {
@@ -107,7 +111,7 @@ panes.set('home', {
   module: null,
   icon: ICONS.home,
   title: 'tab.home',
-  onShow: () => { media.setExpanded(true); apps.setActive(true); updateClock(); },
+  onShow: () => { media.setExpanded(true); apps.setActive(settings?.modules?.apps !== false); updateClock(); },
   onHide: () => { media.setExpanded(false); apps.setActive(false); },
 });
 
@@ -163,6 +167,7 @@ function render() {
   // bula se „desprinde” din marginea dreaptă a pastilei
   const bw = Math.max(0, springs.bw.value);
   const bcx = W / 2 + w / 2 + EAR + Math.max(0, springs.bg.value) + bw / 2;
+  bubbleLeft = bw > 0.5 ? bcx - bw / 2 - EAR : Infinity;
   bubblePathEl.setAttribute('d', bw > 0.5 ? islandPath(W, bw, bw, bw / 2, Math.min(EAR, bw / 4), bcx) : '');
   bubbleEl.style.left = `${bcx - BUBBLE / 2}px`;
 
@@ -194,11 +199,14 @@ function renderActivities() {
 let ticker = 0;
 function tickTransient() {
   const now = performance.now();
-  if (hovering) queue = holdHead(queue, now);
+  // extinsă: tranzitoriile nu se văd, deci așteaptă strângerea; cu cursorul pe captură, ea nu expiră
+  if (expanded) queue = pauseHead(queue, now);
+  else if (hovering) queue = holdHead(queue, now);
   queue = advance(queue, now);
   const next = current(queue, now);
-  if (next !== shown) {
-    shown = next;
+  const changed = next?.uid !== shown?.uid;
+  shown = next;
+  if (changed) {
     if (shown) renderTransient(shown);
     retarget();
   }
@@ -298,8 +306,16 @@ function onHover(inside) {
   // pe o tranzitorie cu butoane (captura), cursorul o ține afișată în loc să extindă insula
   if (inside && shown?.interactive) return;
   if (inside && !expandOnHover) return; // în modul „doar la click”, hover-ul doar strânge
-  hoverTimer = setTimeout(() => setExpanded(inside), inside ? 120 : 220);
+  hoverTimer = setTimeout(() => setExpanded(inside, inside ? hoverTab() : undefined), inside ? 120 : 220);
 }
+
+// cursorul pe bulă: se deschide fila activității din bulă (altfel cea a pastilei)
+function hoverTab() {
+  if (pointerX < bubbleLeft) return undefined;
+  const kind = bubbleEl.dataset.kind;
+  return kind === 'timer' || kind === 'stopwatch' ? 'timer' : kind ? 'home' : undefined;
+}
+document.addEventListener('pointermove', (e) => { pointerX = e.clientX / zoom; });
 
 $('stage').addEventListener('click', () => {
   if (!expanded && !shown?.interactive) {
@@ -328,6 +344,9 @@ function applySettings(st) {
   setLang(st.resolved_language ?? 'ro');
   applyStatic();
   if (expanded && tab === 'home') updateClock();
+  if (updateVersion) $('x-update-text').textContent = t('update.available', { v: updateVersion });
+  media.relabel();
+  if (expanded && tab === 'home') apps.setActive(st.modules.apps !== false);
   zoom = sizeScale(st.size);
   $('stage').style.zoom = zoom;
   expandOnHover = st.expand_on !== 'click';
@@ -349,16 +368,20 @@ if (tauri) {
   self.listen('island-hover', (e) => onHover(!!e.payload));
   self.listen('island-visible', (e) => {
     document.body.classList.toggle('offscreen', !e.payload);
-    if (!e.payload) setExpanded(false);
+    if (!e.payload) { hovering = false; setExpanded(false); }
   });
   // după ce ascultăm, cerem și starea curentă (evenimentele de dinainte de încărcare s-au pierdut)
   const mediaOn = () => settings?.modules?.media !== false;
+  let mediaSeq = 0;
   tauri.event.listen('media-update', (e) => {
     if (!mediaOn()) return;
     const p = e.payload ?? null;
-    // fără copertă în mesaj și fără una afișată (fereastră nouă): cerem starea completă
-    if (p && !('thumbnail' in p) && !media.info?.thumbnail) invoke('media_current').then((i) => media.update(i ?? p)).catch(() => media.update(p));
-    else media.update(p);
+    const my = ++mediaSeq;
+    // fără copertă în mesaj și fără una afișată (fereastră nouă): cerem starea completă;
+    // un răspuns întârziat nu suprascrie un mesaj mai nou
+    if (p && !('thumbnail' in p) && !media.info?.thumbnail) {
+      invoke('media_current').then((i) => my === mediaSeq && media.update(i ?? p)).catch(() => my === mediaSeq && media.update(p));
+    } else media.update(p);
   })
     .then(() => invoke('media_current'))
     .then((info) => { if (info && mediaOn() && !media.hasMedia()) media.update(info); })
@@ -368,6 +391,7 @@ if (tauri) {
   let announced = '';
   const onUpdateState = (st) => {
     const ready = st?.kind === 'ready';
+    updateVersion = ready ? st.version : null;
     $('x-update').hidden = !ready;
     if (!ready) return;
     $('x-update-text').textContent = t('update.available', { v: st.version });
@@ -406,7 +430,11 @@ retarget();
 // modulele noi se încarcă după ce API-ul insulei există
 for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './screenshot-view.js', './shelf-view.js', './mirror-view.js']) {
   import(mod)
-    .then((m) => m.init?.(island))
+    .then((m) => {
+      m.init?.(island);
+      // setările au sosit probabil înainte ca modulul să asculte: i le dăm acum
+      if (settings) window.dispatchEvent(new CustomEvent('island-settings', { detail: settings }));
+    })
     .catch((e) => { if (!String(e).includes('Failed to fetch')) logJs(`${mod}: ${e?.stack ?? e}`); });
 }
 

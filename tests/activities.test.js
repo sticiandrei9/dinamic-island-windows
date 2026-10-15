@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { layout, enqueue, advance, current, holdHead, drop } from '../src/lib/activities.js';
+import { layout, enqueue, advance, current, holdHead, drop, pauseHead } from '../src/lib/activities.js';
 
 const media = { id: 'media', kind: 'media' };
 const timer = { id: 'timer', kind: 'timer' };
@@ -83,4 +83,20 @@ test('scoaterea celei afișate pornește următoarea (nu rămâne blocată)', ()
   let r = enqueue([], { kind: 'alert', duration: 3000 }, 0);
   r = enqueue(r, { kind: 'update', duration: 4000 }, 10);
   assert.equal(drop(r, 'update', 500)[0].startedAt, 0);
+});
+
+test('cât insula e extinsă, anunțurile așteaptă (nu se consumă nevăzute); volumul vechi se aruncă', () => {
+  let q = enqueue([], { kind: 'notification', duration: 5000 }, 0);
+  q = enqueue(q, { kind: 'volume', duration: 1500 }, 100);
+  q = pauseHead(q, 9000);
+  assert.deepEqual(q.map((a) => a.kind), ['notification']);
+  assert.equal(current(advance(q, 13000), 13000)?.kind, 'notification'); // întreagă după strângere
+});
+
+test('confirmările urgente trec în fața notificărilor din coadă', () => {
+  let q = enqueue([], { kind: 'notification', duration: 5000 }, 0);
+  q = enqueue(q, { kind: 'notification', duration: 5000 }, 10);
+  q = enqueue(q, { kind: 'alert', urgent: true, duration: 1800 }, 20);
+  assert.equal(current(q, 20).kind, 'alert');
+  assert.equal(q.length, 3);
 });

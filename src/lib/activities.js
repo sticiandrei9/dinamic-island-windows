@@ -12,9 +12,9 @@ export function layout(persistent) {
 // Adaugă o activitate tranzitorie. Volumul nu se adaugă de mai multe ori: activitatea existentă
 // e actualizată pe loc și, dacă e deja afișată, își reîncepe durata.
 export function enqueue(queue, activity, now) {
-  // volumul trece în fața cozii (feedback imediat); ce era afișat reîncepe după el
-  if (activity.kind === 'volume') {
-    const rest = queue.filter((a) => a.kind !== 'volume').map((a) => ({ ...a, startedAt: undefined }));
+  // volumul și confirmările (urgent) trec în fața cozii (feedback imediat); ce era afișat reîncepe după ele
+  if (activity.kind === 'volume' || activity.urgent) {
+    const rest = queue.filter((a) => activity.urgent || a.kind !== 'volume').map((a) => ({ ...a, startedAt: undefined }));
     return [{ ...activity, startedAt: now }, ...rest];
   }
   const q = [...queue, { ...activity, startedAt: queue.length === 0 ? now : undefined }];
@@ -52,5 +52,13 @@ export function holdHead(queue, now, keepMs = 1500) {
 export function drop(queue, kind, now) {
   const q = queue.filter((a) => a.kind !== kind);
   if (q.length && q[0].startedAt == null) q[0] = { ...q[0], startedAt: now };
+  return q;
+}
+
+// Cât insula e extinsă, tranzitoriile nu se văd: cea din față nu începe (o pornim la strângere),
+// iar volumul (feedback de moment) se aruncă.
+export function pauseHead(queue, now) {
+  const q = queue.filter((a) => a.kind !== 'volume');
+  if (q.length) q[0] = { ...q[0], startedAt: now };
   return q;
 }

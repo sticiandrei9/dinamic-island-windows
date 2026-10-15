@@ -67,6 +67,11 @@ export class MediaView {
     for (const id of ['x-art', 'x-title', 'c-art']) $(id).addEventListener('click', open);
   }
 
+  // după schimbarea limbii: „Necunoscut” în limba nouă
+  relabel() {
+    if (this.info && !this.info.title) $('x-title').textContent = t('media.unknown');
+  }
+
   hasMedia() {
     return !!this.info;
   }
@@ -105,6 +110,7 @@ export class MediaView {
   }
 
   setArt(src) {
+    $('b-art').src = src; // bula (când muzica e a doua activitate)
     for (const img of [$('c-art'), $('x-art')]) {
       img.src = src;
       img.classList.remove('swap');

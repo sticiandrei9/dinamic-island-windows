@@ -45,6 +45,11 @@ pub fn parse_toast(texts: &[String]) -> Option<Toast> {
     }
 }
 
+/// Notificările trimise de Dynamic Island însăși (update gata): insula le arată deja.
+pub fn is_own_toast(t: &Toast) -> bool {
+    t.app.eq_ignore_ascii_case("Dynamic Island")
+}
+
 /// Toast-urile sunt ferestre ale lui ShellExperienceHost: `Windows.UI.Core.CoreWindow` pe Windows 10,
 /// `FlexibleToastView` pe Windows 11.
 pub fn is_toast_window(class: &str, exe: &str) -> bool {
@@ -76,7 +81,7 @@ impl IUIAutomationEventHandler_Impl for WindowOpened_Impl {
                     texts.push(item.CurrentName().map(|s| s.to_string()).unwrap_or_default());
                 }
             }
-            if let Some(t) = parse_toast(&texts) {
+            if let Some(t) = parse_toast(&texts).filter(|t| !is_own_toast(t)) {
                 let _ = self.tx.send(t);
             }
         }
@@ -165,6 +170,14 @@ mod tests {
         // butoanele și eticheta „Notificare nouă” nu sunt conținut
         let t = parse_toast(&v(&["Notificare nouă", "Discord", "Andrei", "Salut", "Închideți"])).unwrap();
         assert_eq!((t.app.as_str(), t.title.as_str(), t.body.as_str()), ("Discord", "Andrei", "Salut"));
+    }
+
+    #[test]
+    fn notificarile_insulei_nu_se_dubleaza() {
+        // „Dynamic Island v0.3.1 e gata”: insula o anunță deja ea însăși
+        let own = parse_toast(&v(&["Dynamic Island", "Dynamic Island v0.3.1 e gata", "Apasă „Aplică”"])).unwrap();
+        assert!(is_own_toast(&own));
+        assert!(!is_own_toast(&parse_toast(&v(&["Discord", "Andrei", "Salut"])).unwrap()));
     }
 
     #[test]

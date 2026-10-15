@@ -168,6 +168,18 @@ fn fetch(t: &Track) -> Result<Option<Vec<Line>>, String> {
     Ok(pick_result(&results, t.duration).and_then(|f| f.synced.as_deref()).map(parse_lrc))
 }
 
+/// Un lacăt pe piesă: ferestrele (monitoarele) care cer aceeași piesă așteaptă prima cerere,
+/// dar piese diferite (skip rapid) nu se blochează una pe alta.
+pub fn key_lock(key: &str) -> std::sync::Arc<Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<Mutex<std::collections::HashMap<String, std::sync::Arc<Mutex<()>>>>> = std::sync::OnceLock::new();
+    let mut map = LOCKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    // lacătele nefolosite (doar în map) se aruncă, ca map-ul să nu crească la nesfârșit
+    if map.len() > 50 {
+        map.retain(|_, l| std::sync::Arc::strong_count(l) > 1);
+    }
+    map.entry(key.to_string()).or_default().clone()
+}
+
 /// Răspunsurile (inclusiv „fără versuri”) se memorează; erorile de rețea nu, ca piesa să fie cerută din nou.
 pub fn remember(cache: &mut Cache, key: String, result: &Result<Option<Vec<Line>>, String>) {
     if let Ok(v) = result {
@@ -187,9 +199,9 @@ pub async fn get_lyrics(app: tauri::AppHandle, track: Track) -> Result<Option<Ve
         return Ok(hit.clone());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        // o cerere pe rând: fiecare insulă (monitor) cere aceeași piesă; a doua o găsește în cache
-        static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
-        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        // fiecare insulă (monitor) cere aceeași piesă; a doua așteaptă prima și o găsește în cache
+        let lock = key_lock(&key);
+        let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(hit) = app.state::<LyricsCache>().0.lock().unwrap().get(&key) {
             return Ok(hit.clone());
         }
@@ -260,6 +272,15 @@ mod tests {
 [00:03.00]c".into()) },
         ];
         assert_eq!(pick_result(&results, 213.0).map(|r| r.duration), Some(213.0));
+    }
+
+    #[test]
+    fn o_cerere_pe_rand_doar_pentru_aceeasi_piesa() {
+        let a1 = key_lock("a|x|1");
+        let a2 = key_lock("a|x|1");
+        let b = key_lock("b|y|2");
+        assert!(std::sync::Arc::ptr_eq(&a1, &a2));
+        assert!(!std::sync::Arc::ptr_eq(&a1, &b));
     }
 
     #[test]

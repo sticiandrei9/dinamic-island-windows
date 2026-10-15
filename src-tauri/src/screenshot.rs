@@ -96,11 +96,12 @@ fn downscale(rgba: &[u8], w: u32, h: u32, tw: u32, th: u32) -> Vec<u8> {
 }
 
 /// Fișierul pe care Instrumentul de decupare l-a salvat singur pentru această captură, dacă există:
-/// un .png modificat între 3 s înainte și 15 s după captură, cel mai apropiat de ea.
-pub fn find_recent(files: &[(PathBuf, u64)], captured_ms: u64) -> Option<PathBuf> {
+/// un .png modificat între 3 s înainte și 15 s după captură, cel mai apropiat de ea; fișierele scrise
+/// de noi pentru capturile anterioare (`exclude`) nu contează.
+pub fn find_recent(files: &[(PathBuf, u64)], captured_ms: u64, exclude: &[PathBuf]) -> Option<PathBuf> {
     files
         .iter()
-        .filter(|(p, _)| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
+        .filter(|(p, _)| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) && !exclude.contains(p))
         .filter(|(_, m)| *m + 3_000 >= captured_ms && *m <= captured_ms + 15_000)
         .min_by_key(|(_, m)| m.abs_diff(captured_ms))
         .map(|(p, _)| p.clone())
@@ -124,9 +125,21 @@ struct Shot {
     saved: Option<PathBuf>,
 }
 
-/// Doar ultima captură rămâne în memorie.
+/// Imaginea completă stă în memorie cel mult 2 minute (miniatura dispare după 6 s).
+pub fn expired(at_ms: u64, now_ms: u64) -> bool {
+    now_ms.saturating_sub(at_ms) > 120_000
+}
+
 #[derive(Default)]
-pub struct ScreenshotState(Mutex<Option<Shot>>);
+struct Shots {
+    /// doar ultima captură
+    last: Option<Shot>,
+    /// fișierele scrise de noi (nu de Instrumentul de decupare), ultimele 20
+    written: Vec<PathBuf>,
+}
+
+#[derive(Default)]
+pub struct ScreenshotState(Mutex<Shots>);
 
 #[derive(Serialize, Clone)]
 struct ShotEvent {
@@ -220,6 +233,13 @@ pub fn spawn(app: AppHandle) {
         let mut tool_seen: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(Duration::from_millis(400));
+            {
+                let state = app.state::<ScreenshotState>();
+                let mut st = state.0.lock().unwrap();
+                if st.last.as_ref().is_some_and(|s| expired(s.at_ms, now_ms())) {
+                    st.last = None; // eliberează imaginea completă (zeci de MB la 4K)
+                }
+            }
             let fg = win::foreground_exe();
             if is_capture_tool(&fg) {
                 if tool_seen.is_none() {
@@ -249,7 +269,7 @@ pub fn spawn(app: AppHandle) {
             tool_seen = None; // o singură captură per selecție
             let id = next_id;
             next_id += 1;
-            *app.state::<ScreenshotState>().0.lock().unwrap() = Some(Shot { id, w, h, rgba, at_ms: now_ms(), saved: None });
+            app.state::<ScreenshotState>().0.lock().unwrap().last = Some(Shot { id, w, h, rgba, at_ms: now_ms(), saved: None });
             let thumb = format!("data:image/png;base64,{}", STANDARD.encode(png));
             let _ = app.emit("screenshot", ShotEvent { id, thumb, width: w, height: h });
         }
@@ -280,20 +300,26 @@ fn modified_ms(p: &Path) -> Option<u64> {
 fn save_shot(app: &AppHandle, id: u64) -> Result<PathBuf, String> {
     let state = app.state::<ScreenshotState>();
     let mut guard = state.0.lock().unwrap();
-    let shot = guard.as_mut().filter(|s| s.id == id).ok_or("captura nu mai e disponibilă")?;
+    let Shots { last, written } = &mut *guard;
+    // erorile sunt chei de traducere (interfața le afișează cu t())
+    let shot = last.as_mut().filter(|s| s.id == id).ok_or("shot.gone")?;
     if let Some(p) = shot.saved.as_ref().filter(|p| p.exists()) {
         return Ok(p.clone());
     }
-    let dir = screenshots_dir().ok_or("folderul Capturi de ecran nu e disponibil")?;
+    let dir = screenshots_dir().ok_or("shot.noFolder")?;
     let files: Vec<(PathBuf, u64)> = std::fs::read_dir(&dir)
         .map(|rd| rd.flatten().filter_map(|e| Some((e.path(), modified_ms(&e.path())?))).collect())
         .unwrap_or_default();
-    let path = match find_recent(&files, shot.at_ms) {
+    let path = match find_recent(&files, shot.at_ms, written) {
         Some(p) => p,
         None => {
-            let png = crate::windows_list::encode_png(&shot.rgba, shot.w, shot.h).ok_or("nu pot coda imaginea")?;
+            let png = crate::windows_list::encode_png(&shot.rgba, shot.w, shot.h).ok_or("shot.encode")?;
             let path = unique_name(&dir, &format!("{} {}", crate::i18n::t("shot.file"), local_stamp()), |p| p.exists());
             std::fs::write(&path, png).map_err(|e| e.to_string())?;
+            written.push(path.clone());
+            if written.len() > 20 {
+                written.remove(0);
+            }
             path
         }
     };
@@ -377,8 +403,16 @@ mod tests {
     fn fisierul_salvat_deja_de_instrumentul_de_decupare() {
         let f = |n: &str, m: u64| (PathBuf::from(n), m);
         let files = vec![f("vechi.png", 1_000), f("captura.png", 10_500), f("alta.jpg", 10_400), f("viitor.png", 40_000)];
-        assert_eq!(find_recent(&files, 10_000), Some(PathBuf::from("captura.png")));
-        assert_eq!(find_recent(&files, 100_000), None);
+        assert_eq!(find_recent(&files, 10_000, &[]), Some(PathBuf::from("captura.png")));
+        assert_eq!(find_recent(&files, 100_000, &[]), None);
+        // fișierul scris de noi pentru captura precedentă nu e luat drept captura nouă
+        assert_eq!(find_recent(&files, 10_000, &[PathBuf::from("captura.png")]), None);
+    }
+
+    #[test]
+    fn captura_veche_eliberata_din_memorie() {
+        assert!(!expired(1_000, 1_000 + 119_000));
+        assert!(expired(1_000, 1_000 + 121_000));
     }
 
     #[test]

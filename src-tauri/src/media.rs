@@ -298,6 +298,27 @@ fn pick_session(m: &Manager, prev_playing: &HashSet<String>, displayed: Option<&
     (chosen, now_playing)
 }
 
+/// Sesiunea care primește o comandă (⏯ ⏭ ⏮, seek): cea afișată în insulă, chiar dacă mai cântă alta;
+/// dacă a dispărut, cea care cântă, apoi cea curentă a Windows, apoi prima.
+pub fn command_session_index(ids: &[String], playing: &[bool], displayed: Option<&str>, current: Option<usize>) -> Option<usize> {
+    displayed
+        .and_then(|d| ids.iter().position(|id| id == d))
+        .or_else(|| playing.iter().position(|p| *p))
+        .or(current)
+        .or(if ids.is_empty() { None } else { Some(0) })
+}
+
+fn command_session(m: &Manager, displayed: Option<&str>) -> Option<Session> {
+    let list: Vec<Session> = m.GetSessions().map(|v| v.into_iter().collect()).unwrap_or_default();
+    let ids: Vec<String> = list.iter().map(session_id).collect();
+    let playing: Vec<bool> = list
+        .iter()
+        .map(|s| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).map(|st| st == Status::Playing).unwrap_or(false))
+        .collect();
+    let current = m.GetCurrentSession().ok().map(|s| session_id(&s)).and_then(|id| ids.iter().position(|x| *x == id));
+    command_session_index(&ids, &playing, displayed, current).and_then(|i| list.get(i).cloned())
+}
+
 fn read_thumbnail(props: &Props) -> Option<String> {
     let read = || -> windows::core::Result<String> {
         let stream = await_op(props.Thumbnail()?.OpenReadAsync()?)?;
@@ -366,11 +387,16 @@ pub fn spawn(app: AppHandle) {
         let mut prev_playing: HashSet<String> = HashSet::new();
         let mut clock = PosClock::default();
         let mut sent_thumb: Option<String> = None;
+        let mut gsmtc_logged = false;
         loop {
             let manager = match request_manager() {
                 Ok(m) => m,
                 Err(e) => {
-                    log::warn!("GSMTC indisponibil: {e}");
+                    // o singură dată (pe Windows N fără Media Feature Pack ar umple log-ul)
+                    if !gsmtc_logged {
+                        gsmtc_logged = true;
+                        log::warn!("GSMTC indisponibil: {e}");
+                    }
                     std::thread::sleep(Duration::from_secs(5));
                     continue;
                 }
@@ -457,7 +483,7 @@ pub async fn media_seek(seconds: f64, state: tauri::State<'_, LastMedia>) -> Res
     let displayed = store.get().map(|m| m.aumid);
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let m = request_manager().map_err(|e| e.to_string())?;
-        let s = pick_session(&m, &HashSet::new(), displayed.as_deref()).0.ok_or("nicio sesiune media")?;
+        let s = command_session(&m, displayed.as_deref()).ok_or("nicio sesiune media")?;
         control_outcome(s.TryChangePlaybackPositionAsync(seconds_to_ticks(seconds)).and_then(await_op))
     })
     .await
@@ -474,7 +500,7 @@ pub async fn media_control(action: String, state: tauri::State<'_, LastMedia>) -
     let displayed = store.get().map(|m| m.aumid);
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let m = request_manager().map_err(|e| e.to_string())?;
-        let s = pick_session(&m, &HashSet::new(), displayed.as_deref()).0.ok_or("nicio sesiune media")?;
+        let s = command_session(&m, displayed.as_deref()).ok_or("nicio sesiune media")?;
         let op = match action {
             MediaAction::PlayPause => s.TryTogglePlayPauseAsync(),
             MediaAction::Next => s.TrySkipNextAsync(),
@@ -563,6 +589,17 @@ mod tests {
     fn sursa_afisata_inchisa_trece_pe_cea_care_ruleaza() {
         let s = ids(&["spotify"]);
         assert_eq!(choose_session_index(&s, &[true], &set(&["spotify"]), Some("chrome"), None), Some(0));
+    }
+
+    #[test]
+    fn comanda_merge_la_sursa_afisata_chiar_daca_mai_canta_una() {
+        // Spotify și YouTube cântă amândouă, insula arată YouTube: ⏯ trebuie să meargă la YouTube
+        let s = ids(&["spotify", "chrome"]);
+        assert_eq!(command_session_index(&s, &[true, true], Some("chrome"), Some(0)), Some(1));
+        // sursa afișată a dispărut: cea care cântă, apoi cea curentă
+        assert_eq!(command_session_index(&s, &[false, true], Some("vlc"), Some(0)), Some(1));
+        assert_eq!(command_session_index(&s, &[false, false], None, Some(0)), Some(0));
+        assert_eq!(command_session_index(&[], &[], Some("chrome"), None), None);
     }
 
     #[test]

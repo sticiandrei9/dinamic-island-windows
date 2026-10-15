@@ -53,14 +53,14 @@ pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut states: HashMap<String, WinState> = HashMap::new();
         let mut fs_at = Instant::now() - Duration::from_secs(1);
-        let mut fs_mon: Option<(i32, i32, i32, i32)> = None;
+        let mut fs_mons: Vec<(i32, i32, i32, i32)> = Vec::new();
 
         loop {
             std::thread::sleep(Duration::from_millis(30));
             let size_scale = app.state::<SettingsState>().get().size.scale();
             if fs_at.elapsed() > Duration::from_millis(500) {
                 fs_at = Instant::now();
-                fs_mon = platform::fullscreen_monitor();
+                fs_mons = platform::fullscreen_monitors();
             }
             let cursor = platform::cursor_pos();
             let rects = app.state::<IslandRects>().0.lock().unwrap().clone();
@@ -77,7 +77,7 @@ pub fn spawn(app: AppHandle) {
                     st.geo_at = Some(Instant::now());
                 }
 
-                let hidden = fs_mon.is_some_and(|m| on_monitor((st.geo.0, st.geo.1), m));
+                let hidden = fs_mons.iter().any(|m| on_monitor((st.geo.0, st.geo.1), *m));
                 // retrimis la 2 s: o fereastră abia creată poate să nu fi ascultat încă
                 let resend = st.visible_sent.map_or(true, |t| t.elapsed() > Duration::from_secs(2));
                 if hidden != st.hidden || resend {
@@ -88,6 +88,10 @@ pub fn spawn(app: AppHandle) {
                     st.hidden = hidden;
                     if hidden {
                         let _ = win.set_ignore_cursor_events(true);
+                        // cursorul putea fi pe insulă: interfața nu trebuie să creadă că e încă acolo
+                        if st.inside == Some(true) {
+                            let _ = app.emit_to(label.as_str(), "island-hover", false);
+                        }
                         st.inside = Some(false);
                     }
                 }

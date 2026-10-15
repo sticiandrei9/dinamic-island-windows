@@ -13,7 +13,7 @@ export function init(island) {
       island.dropTransients('screenshot');
       invoke(command, { id: shot.id })
         .then(() => island.pushTransient({ kind: 'alert', icon: command === 'screenshot_to_shelf' ? 'shelf' : 'download', title: t(doneKey), color: 'var(--green)', duration: 1800 }))
-        .catch((err) => island.pushTransient({ kind: 'alert', icon: 'bell', title: t('shot.failed'), detail: String(err), color: 'var(--red)', duration: 3000 }));
+        .catch((err) => island.pushTransient({ kind: 'alert', icon: 'bell', title: t('shot.failed'), detail: t(String(err)), color: 'var(--red)', duration: 3000 }));
     };
   }
 

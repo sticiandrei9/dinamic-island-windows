@@ -17,24 +17,42 @@ fn endpoint(e: &IMMDeviceEnumerator, role: windows::Win32::Media::Audio::ERole) 
     }
 }
 
-/// Microfonul implicit e pe mute? None = nu există microfon.
-pub fn capture_mute(e: &IMMDeviceEnumerator) -> Option<bool> {
-    let (_, v) = endpoint(e, eConsole)?;
-    unsafe { v.GetMute().ok().map(|b| b.as_bool()) }
+/// Microfoanele implicite (pentru aplicații și pentru comunicații — Teams/Zoom), fără dubluri.
+fn default_endpoints(e: &IMMDeviceEnumerator) -> Vec<IAudioEndpointVolume> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut out = Vec::new();
+    for role in [eConsole, eCommunications] {
+        if let Some((id, v)) = endpoint(e, role) {
+            if !ids.contains(&id) {
+                ids.push(id);
+                out.push(v);
+            }
+        }
+    }
+    out
 }
 
-/// Mute pe microfonul implicit, și pe cel pentru comunicații (Teams/Zoom îl folosesc pe acela) dacă e altul.
+/// „Pe mute” doar dacă niciun microfon implicit nu mai transmite. None = nu există microfon.
+pub fn all_muted(states: &[bool]) -> Option<bool> {
+    if states.is_empty() { None } else { Some(states.iter().all(|m| *m)) }
+}
+
+pub fn capture_mute(e: &IMMDeviceEnumerator) -> Option<bool> {
+    let states: Vec<bool> = default_endpoints(e).iter().filter_map(|v| unsafe { v.GetMute() }.ok().map(|b| b.as_bool())).collect();
+    all_muted(&states)
+}
+
+/// Mute pe toate microfoanele implicite; eroare doar dacă n-a reușit pe niciunul.
 fn set_capture_mute(e: &IMMDeviceEnumerator, muted: bool) -> Result<(), String> {
-    let mut done: Vec<String> = Vec::new();
-    for role in [eConsole, eCommunications] {
-        let Some((id, v)) = endpoint(e, role) else { continue };
-        if done.contains(&id) {
-            continue;
+    let mut ok = 0;
+    let mut last_err = "nu există microfon".to_string();
+    for v in default_endpoints(e) {
+        match unsafe { v.SetMute(muted, std::ptr::null()) } {
+            Ok(()) => ok += 1,
+            Err(err) => last_err = err.to_string(),
         }
-        unsafe { v.SetMute(muted, std::ptr::null()) }.map_err(|e| e.to_string())?;
-        done.push(id);
     }
-    if done.is_empty() { Err("nu există microfon".into()) } else { Ok(()) }
+    if ok > 0 { Ok(()) } else { Err(last_err) }
 }
 
 /// Butonul de mute din pastila apelului. Întoarce starea nouă.
@@ -48,4 +66,16 @@ pub async fn mic_set_mute(muted: bool) -> Result<bool, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mute_doar_daca_toate_microfoanele_implicite_sunt_pe_mute() {
+        assert_eq!(all_muted(&[]), None);
+        assert_eq!(all_muted(&[true]), Some(true));
+        assert_eq!(all_muted(&[true, false]), Some(false)); // unul încă transmite
+    }
 }

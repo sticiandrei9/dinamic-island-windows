@@ -21,6 +21,8 @@ pub struct Stopwatch {
     pub base_ms: u64,
     pub started_at: Option<u64>,
     pub laps: Vec<u64>,
+    /// câte tururi au fost în total (se păstrează doar ultimele 5), pentru numerotare
+    pub lap_total: u32,
 }
 
 /// Un singur ceas pentru toată aplicația (toate insulele îl afișează la fel).
@@ -99,6 +101,7 @@ impl Clock {
         let e = self.stopwatch_elapsed(now);
         if let Some(s) = self.stopwatch.as_mut() {
             s.laps.push(e);
+            s.lap_total += 1;
             if s.laps.len() > 5 {
                 s.laps.remove(0);
             }
@@ -131,10 +134,16 @@ fn with_clock(app: &AppHandle, f: impl FnOnce(&mut Clock, u64)) {
     publish(app);
 }
 
+/// Sunetul de alarmă din folderul Windows (care poate fi pe altă partiție).
+pub fn alarm_path(system_root: Option<&str>) -> String {
+    format!("{}\\Media\\Alarm01.wav", system_root.unwrap_or("C:\\Windows"))
+}
+
 /// Sunetul de alarmă Windows, de 3 ori, pe un thread separat.
 fn play_alarm() {
     std::thread::spawn(|| {
-        let path: Vec<u16> = "C:\\Windows\\Media\\Alarm01.wav".encode_utf16().chain(Some(0)).collect();
+        let root = std::env::var("SystemRoot").ok();
+        let path: Vec<u16> = alarm_path(root.as_deref()).encode_utf16().chain(Some(0)).collect();
         for _ in 0..3 {
             unsafe {
                 let _ = PlaySoundW(PCWSTR(path.as_ptr()), None, SND_FILENAME | SND_SYNC | SND_NODEFAULT);
@@ -162,7 +171,10 @@ pub fn spawn(app: AppHandle) {
             };
             if done {
                 finished_at = Some(now);
-                play_alarm();
+                // cu modulul Timer oprit nu se vede nimic, deci nici nu sună
+                if app.state::<crate::settings::SettingsState>().get().modules.timer {
+                    play_alarm();
+                }
             }
             if clear {
                 finished_at = None;
@@ -256,5 +268,13 @@ mod tests {
             s.stopwatch_lap(t * 1_000);
         }
         assert_eq!(s.stopwatch.as_ref().unwrap().laps, vec![3_000, 4_000, 5_000, 6_000, 7_000]);
+        // numerotarea continuă: cele 5 afișate sunt turele 3–7
+        assert_eq!(s.stopwatch.as_ref().unwrap().lap_total, 7);
+    }
+
+    #[test]
+    fn sunetul_alarmei_din_folderul_windows() {
+        assert_eq!(alarm_path(Some("D:\\Win")), "D:\\Win\\Media\\Alarm01.wav");
+        assert_eq!(alarm_path(None), "C:\\Windows\\Media\\Alarm01.wav");
     }
 }

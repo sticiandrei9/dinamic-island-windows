@@ -210,7 +210,10 @@ fn cached_icon(key: String, load: impl FnOnce() -> Option<String>) -> Option<Str
         return v.clone();
     }
     let v = load();
-    icon_cache().lock().unwrap().insert(key, v.clone());
+    // un eșec (de ex. fișier încă în scriere) nu rămâne în cache: se reîncearcă data viitoare
+    if v.is_some() {
+        icon_cache().lock().unwrap().insert(key, v.clone());
+    }
     v
 }
 

@@ -92,6 +92,8 @@ fn update(app: &AppHandle, f: impl FnOnce(Vec<ShelfItem>) -> Vec<ShelfItem>) -> 
 pub async fn shelf_list(app: AppHandle) -> Vec<ShelfView> {
     let items = app.state::<ShelfState>().items.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // SHGetFileInfo (iconițele) cere COM pe thread
+        let _com = crate::platform::ComGuard::new(windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
         items
             .into_iter()
             .map(|i| {
@@ -123,7 +125,13 @@ pub fn shelf_clear(app: AppHandle) -> Result<(), String> {
 /// Deschide fișierul cu aplicația implicită.
 #[tauri::command]
 pub fn shelf_open(path: String) -> Result<(), String> {
-    std::process::Command::new("explorer").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("explorer").raw_arg(open_arg(&path)).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Calea între ghilimele (Command le pune doar când calea are spații; explorer desparte și la virgulă).
+pub fn open_arg(path: &str) -> String {
+    format!("\"{path}\"")
 }
 
 /// Arată fișierul selectat în Explorer.
@@ -165,6 +173,8 @@ mod tests {
     #[test]
     fn selectie_in_explorer_cu_virgula_in_cale() {
         assert_eq!(select_arg(r"C:\Poze\Vacanță, 2026\a.jpg"), r#"/select,"C:\Poze\Vacanță, 2026\a.jpg""#);
+        // deschiderea: și fără spații, virgula ar despărți calea
+        assert_eq!(open_arg(r"C:\x\a,b.pdf"), r#""C:\x\a,b.pdf""#);
     }
 
     #[test]

@@ -22,6 +22,9 @@ test('după un gh eșuat, indicația doar creează release-ul', () => {
   const h = recoveryHint('release', '0.2.0', 'u/r');
   assert.doesNotMatch(h, /git push/);
   assert.match(h, /gh release create v0\.2\.0/);
+  // o ciornă cu fișierele lipsă e completată înainte de publicare
+  assert.ok(h.indexOf('gh release upload v0.2.0') >= 0 && h.indexOf('gh release upload') < h.indexOf('--draft=false'));
+  assert.match(h, /--clobber/);
 });
 
 test('validateVersion acceptă doar semver mai mare', () => {

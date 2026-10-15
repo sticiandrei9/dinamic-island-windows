@@ -92,41 +92,67 @@ pub fn covers_monitor(win: (i32, i32, i32, i32), mon: (i32, i32, i32, i32)) -> b
     win.0 <= mon.0 && win.1 <= mon.1 && win.2 >= mon.2 && win.3 >= mon.3
 }
 
-/// Dreptunghiul (left, top, right, bottom) al monitorului pe care aplicația din prim-plan
-/// rulează pe tot ecranul (video, joc), dacă există. Ferestrele procesului nostru sunt ignorate.
-pub fn fullscreen_monitor() -> Option<(i32, i32, i32, i32)> {
+unsafe extern "system" fn collect_hwnd(hwnd: HWND, lparam: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::BOOL {
+    (*(lparam.0 as *mut Vec<HWND>)).push(hwnd);
+    windows::Win32::Foundation::BOOL(1)
+}
+
+/// Monitoarele (left, top, right, bottom) pe care rulează ceva pe tot ecranul (video, joc).
+/// Pentru fiecare monitor contează fereastra cea mai de sus (ordinea Z) de pe el; ferestrele noastre,
+/// ascunse, de tip „tool” și desktop-ul/taskbar-ul sunt sărite.
+pub fn fullscreen_monitors() -> Vec<(i32, i32, i32, i32)> {
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowLongW, IsWindowVisible, GWL_STYLE, WS_CAPTION, WS_EX_TOOLWINDOW};
+    let mut out = Vec::new();
+    let mut seen: Vec<isize> = Vec::new();
     unsafe {
+        let mut list: Vec<HWND> = Vec::new();
+        let _ = EnumWindows(Some(collect_hwnd), windows::Win32::Foundation::LPARAM(&mut list as *mut Vec<HWND> as isize));
         let fg = GetForegroundWindow();
-        if fg.0.is_null() {
-            return None;
-        }
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(fg, Some(&mut pid));
-        if pid == GetCurrentProcessId() {
-            return None;
-        }
-        let mut cls = [0u16; 64];
-        let n = GetClassNameW(fg, &mut cls).max(0) as usize;
-        let class = String::from_utf16_lossy(&cls[..n]);
-        if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd") {
-            return None;
-        }
-        let mut wr = RECT::default();
-        GetWindowRect(fg, &mut wr).ok()?;
-        let mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
-        if mon.is_invalid() {
-            return None;
-        }
-        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-        if !GetMonitorInfoW(mon, &mut mi).as_bool() {
-            return None;
-        }
-        let m = mi.rcMonitor;
-        let m = (m.left, m.top, m.right, m.bottom);
-        let covers = covers_monitor((wr.left, wr.top, wr.right, wr.bottom), m);
+        let own = GetCurrentProcessId();
         let state = SHQueryUserNotificationState().map(|s| s.0).unwrap_or(QUNS_ACCEPTS_NOTIFICATIONS.0);
-        is_fullscreen(covers, state).then_some(m)
+        for h in list {
+            if !IsWindowVisible(h).as_bool() || GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
+                continue;
+            }
+            let mut cloaked = 0u32;
+            let _ = DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(h, Some(&mut pid));
+            let mut wr = RECT::default();
+            if cloaked != 0 || pid == own || GetWindowRect(h, &mut wr).is_err() || wr.right <= wr.left || wr.bottom <= wr.top {
+                continue;
+            }
+            let mon = MonitorFromWindow(h, MONITOR_DEFAULTTONULL);
+            if mon.is_invalid() || seen.contains(&(mon.0 as isize)) {
+                continue;
+            }
+            seen.push(mon.0 as isize);
+            let mut cls = [0u16; 64];
+            let n = GetClassNameW(h, &mut cls).max(0) as usize;
+            if matches!(String::from_utf16_lossy(&cls[..n]).as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+                continue;
+            }
+            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if !GetMonitorInfoW(mon, &mut mi).as_bool() {
+                continue;
+            }
+            let m = (mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom);
+            let covers = covers_monitor((wr.left, wr.top, wr.right, wr.bottom), m);
+            let has_caption = GetWindowLongW(h, GWL_STYLE) as u32 & WS_CAPTION.0 == WS_CAPTION.0;
+            if window_fullscreen(covers, h == fg, state, has_caption) {
+                out.push(m);
+            }
+        }
     }
+    out
+}
+
+/// Fereastra de sus a unui monitor rulează pe tot ecranul? Cea activă: starea Windows (ca la notificări).
+/// Una inactivă (alt monitor): acoperă monitorul și n-are bară de titlu (video F11, joc); o fereastră
+/// maximizată obișnuită are bară de titlu.
+pub fn window_fullscreen(covers: bool, foreground: bool, notification_state: i32, has_caption: bool) -> bool {
+    if foreground { is_fullscreen(covers, notification_state) } else { covers && !has_caption }
 }
 
 /// Fereastra acoperă monitorul ȘI Windows o consideră pe tot ecranul (aceeași stare cu care
@@ -148,6 +174,18 @@ mod tests {
         assert!(covers_monitor((-8, -8, 1928, 1088), mon)); // ferestre cu margini în afara ecranului
         assert!(!covers_monitor((0, 0, 1920, 1040), mon)); // maximizat, cu taskbar vizibil
         assert!(!covers_monitor((100, 100, 800, 600), mon));
+    }
+
+    #[test]
+    fn fullscreen_pe_alt_monitor_decat_cel_activ() {
+        // fereastra activă: decide starea Windows (QUNS), ca înainte
+        assert!(window_fullscreen(true, true, QUNS_BUSY.0, true));
+        assert!(!window_fullscreen(true, true, QUNS_ACCEPTS_NOTIFICATIONS.0, false));
+        // pe alt monitor, inactivă: video F11 / joc fără bară de titlu care acoperă monitorul
+        assert!(window_fullscreen(true, false, QUNS_ACCEPTS_NOTIFICATIONS.0, false));
+        // o fereastră maximizată obișnuită (are bară de titlu) nu e fullscreen
+        assert!(!window_fullscreen(true, false, QUNS_ACCEPTS_NOTIFICATIONS.0, true));
+        assert!(!window_fullscreen(false, false, QUNS_BUSY.0, false));
     }
 
     #[test]

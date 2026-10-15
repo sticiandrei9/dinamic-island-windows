@@ -137,6 +137,8 @@ pub fn spawn(app: AppHandle) {
         let mut last_volume: Option<(f32, bool)> = None;
         let mut osd: Option<HWND> = None;
         let mut osd_logged = false;
+        let mut restored_once = false;
+        let mut device_error_logged = false;
         let lcd = unsafe {
             CreateFileW(w!("\\\\.\\LCD"), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None).ok()
         };
@@ -147,8 +149,10 @@ pub fn spawn(app: AppHandle) {
             let enabled = app.state::<SettingsState>().get().modules.volume;
             if !enabled {
                 // modul oprit: renunțăm la callback și dăm înapoi OSD-ul Windows
-                if endpoint.take().is_some() || osd.take().is_some() {
-                    restore_osd(); // îl caută din nou: poate a fost ascuns de o sesiune anterioară
+                // și o dată la pornire: poate a fost ascuns de o sesiune anterioară care s-a închis brusc
+                if endpoint.take().is_some() || osd.take().is_some() || !restored_once {
+                    restore_osd();
+                    restored_once = true;
                 }
                 std::thread::sleep(Duration::from_millis(500));
                 continue;
@@ -158,11 +162,24 @@ pub fn spawn(app: AppHandle) {
             if checked_device.elapsed() > Duration::from_secs(2) {
                 checked_device = Instant::now();
                 let id = default_endpoint_id(&enumerator);
-                if endpoint.as_ref().map(|e| Some(&e.id)) != Some(id.as_ref()) {
+                // fără difuzor (desktop fără boxe): nimic de urmărit, și fără reîncercări în buclă
+                let changed = match (&endpoint, &id) {
+                    (None, None) => false,
+                    (Some(e), Some(i)) => e.id != *i,
+                    _ => true,
+                };
+                if changed {
                     endpoint = None;
                     match register(&enumerator, &tx) {
-                        Ok(e) => endpoint = Some(e),
-                        Err(e) => log::warn!("volum: nu pot urmări difuzorul implicit: {e}"),
+                        Ok(e) => {
+                            endpoint = Some(e);
+                            device_error_logged = false;
+                        }
+                        Err(e) if !device_error_logged => {
+                            device_error_logged = true;
+                            log::warn!("volum: nu pot urmări difuzorul implicit: {e}");
+                        }
+                        Err(_) => {}
                     }
                 }
             }
@@ -183,8 +200,10 @@ pub fn spawn(app: AppHandle) {
                             log::info!("OSD-ul Windows de volum nu poate fi ascuns pe această versiune; apar ambele");
                         }
                     }
+                    // în fullscreen insula e ascunsă: atunci pop-up-ul Windows rămâne singurul feedback
                     if let Some(h) = osd {
-                        unsafe { let _ = ShowWindow(h, SW_MINIMIZE); }
+                        let cmd = if crate::platform::fullscreen_monitors().is_empty() { SW_MINIMIZE } else { SW_RESTORE };
+                        unsafe { let _ = ShowWindow(h, cmd); }
                     }
                 }
             }

@@ -45,7 +45,8 @@ export function recoveryHint(stage, version, repo) {
   if (stage === 'push') {
     return `Commit-ul și tag-ul v${version} există local. Termină publicarea (fără rebuild):\n  git push --atomic origin main v${version}\n  ${release}`;
   }
-  return `Codul și tag-ul sunt pe GitHub, dar release-ul nu e publicat. Dacă există ca ciornă:\n  gh release edit v${version} --draft=false --latest --repo ${repo}\naltfel creează-l:\n  ${release}`;
+  const files = `dist-release/${assetName(version)} dist-release/latest.json`;
+  return `Codul și tag-ul sunt pe GitHub, dar release-ul nu e publicat. Dacă există ca ciornă, completează fișierele și publică:\n  gh release upload v${version} ${files} --clobber --repo ${repo}\n  gh release edit v${version} --draft=false --latest --repo ${repo}\naltfel creează-l:\n  ${release}`;
 }
 
 // Formatul `latest.json` citit de tauri-plugin-updater.

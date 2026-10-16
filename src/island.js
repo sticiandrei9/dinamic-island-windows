@@ -319,6 +319,8 @@ function onHover(inside) {
   // pe o tranzitorie cu butoane (captura), cursorul o ține afișată în loc să extindă insula
   if (inside && shown?.interactive) return;
   if (inside && !expandOnHover) return; // în modul „doar la click”, hover-ul doar strânge
+  // cât se scrie o notiță, ieșirea cursorului nu strânge insula (o strâng Enter, Esc sau click în altă parte)
+  if (!inside && document.activeElement?.classList.contains('nt-input')) return;
   hoverTimer = setTimeout(() => setExpanded(inside, inside ? hoverTab() : undefined), inside ? 120 : 220);
 }
 

@@ -53,6 +53,7 @@ export function init(island) {
   function apply(p) {
     items = p.items ?? [];
     if (p.new && items[0]) {
+      island.dropTransients('clip'); // copieri rapide: doar ultima, nu o coadă de câte 2 s
       island.pushTransient({ kind: 'clip', icon: 'copy', title: t('clip.copied'), detail: clipPreview(items[0]), duration: 2000 });
     }
     if (shown) render();

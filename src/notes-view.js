@@ -94,9 +94,9 @@ export function init(island) {
   const grab = () => invoke('notes_focus', { on: true }).catch(() => {});
   function release() {
     invoke('notes_focus', { on: false }).catch(() => {});
-    // deschisă cu scurtătura și cu mouse-ul în altă parte, insula nu mai are cine s-o strângă
+    // cursorul e în altă parte (scurtătura, sau a ieșit cât se scria și ieșirea n-a strâns): insula nu mai are cine s-o strângă
     clearTimeout(hideTimer);
-    if (hotkeyOpen && !island.hovering) hideTimer = setTimeout(() => { if (!island.hovering) island.collapse(); }, 1500);
+    if (!island.hovering) hideTimer = setTimeout(() => { if (!island.hovering) island.collapse(); }, 1500);
   }
   input.addEventListener('focus', grab);
   // fereastra nu e activă (NOACTIVATE), deci `focus` nu vine la click: activăm la apăsare (al doilea grab e inofensiv)
@@ -150,6 +150,8 @@ export function init(island) {
   // scurtătura globală: insula se deschide pe Notițe, cu câmpul gata de scris
   tauri.webviewWindow.getCurrentWebviewWindow().listen('island-notes', () => {
     if (island.settings?.modules?.notes === false) return;
+    // insula ascunsă pentru fullscreen: nicio activare, focusul rămâne la joc
+    if (document.body.classList.contains('offscreen')) return;
     hotkeyOpen = true;
     clearTimeout(hideTimer);
     island.expandTo('notes');

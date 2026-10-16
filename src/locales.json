@@ -145,7 +145,7 @@
     "module.mirror": "Oglindă cameră",
     "module.mirror.hint": "Vezi-te înainte de un apel",
     "module.claude": "Claude",
-    "module.claude.hint": "Anunță când Claude Code lucrează, te așteaptă sau a terminat",
+    "module.claude.hint": "Anunță când Claude Code lucrează, te așteaptă sau a terminat (de la următoarea sesiune Claude)",
     "module.downloads": "Descărcări",
     "module.downloads.hint": "Arată descărcările în curs și anunță când s-au terminat",
     "module.unlock": "Lacăt la deblocare",
@@ -243,7 +243,11 @@
     "settings.claudeMissing": "Hook-ul Claude lipsește.",
     "settings.claudeInstall": "Instalează",
     "settings.claudeDev": "Versiune de dezvoltare: hook-ul nu se instalează dintr-un build temporar.",
-    "settings.claudeInvalid": "Hook-ul Claude nu s-a putut instala: {v}"
+    "settings.claudeInvalid": "Hook-ul Claude nu s-a putut instala: {v}",
+    "claude.err.noProfile": "lipsește folderul utilizatorului (USERPROFILE)",
+    "claude.err.badJson": "~/.claude/settings.json nu e JSON valid ({v})",
+    "claude.err.notObject": "~/.claude/settings.json nu e un obiect JSON",
+    "claude.err.hooksShape": "„hooks” din ~/.claude/settings.json nu e un obiect de liste"
   },
   "en": {
     "tab.home": "Home",
@@ -387,7 +391,7 @@
     "module.mirror": "Camera mirror",
     "module.mirror.hint": "Check yourself before a call",
     "module.claude": "Claude",
-    "module.claude.hint": "Tells you when Claude Code is working, waiting for you or done",
+    "module.claude.hint": "Tells you when Claude Code is working, waiting for you or done (from the next Claude session)",
     "module.downloads": "Downloads",
     "module.downloads.hint": "Shows downloads in progress and tells you when they finish",
     "module.unlock": "Unlock padlock",
@@ -482,7 +486,11 @@
     "settings.claudeMissing": "Claude hook is missing.",
     "settings.claudeInstall": "Install",
     "settings.claudeDev": "Development build: the hook is not installed from a temporary build.",
-    "settings.claudeInvalid": "The Claude hook could not be installed: {v}"
+    "settings.claudeInvalid": "The Claude hook could not be installed: {v}",
+    "claude.err.noProfile": "the user folder (USERPROFILE) is missing",
+    "claude.err.badJson": "~/.claude/settings.json is not valid JSON ({v})",
+    "claude.err.notObject": "~/.claude/settings.json is not a JSON object",
+    "claude.err.hooksShape": "\"hooks\" in ~/.claude/settings.json is not an object of lists"
   },
   "ru": {
     "tab.home": "Главная",
@@ -634,7 +642,7 @@
     "module.mirror": "Зеркало",
     "module.mirror.hint": "Посмотрите на себя перед звонком",
     "module.claude": "Claude",
-    "module.claude.hint": "Сообщает, когда Claude Code работает, ждёт вас или закончил",
+    "module.claude.hint": "Сообщает, когда Claude Code работает, ждёт вас или закончил (со следующей сессии Claude)",
     "module.downloads": "Загрузки",
     "module.downloads.hint": "Показывает текущие загрузки и сообщает о завершении",
     "module.unlock": "Замок при разблокировке",
@@ -735,6 +743,10 @@
     "settings.claudeMissing": "Хук Claude отсутствует.",
     "settings.claudeInstall": "Установить",
     "settings.claudeDev": "Сборка для разработки: хук не устанавливается из временной сборки.",
-    "settings.claudeInvalid": "Не удалось установить хук Claude: {v}"
+    "settings.claudeInvalid": "Не удалось установить хук Claude: {v}",
+    "claude.err.noProfile": "нет папки пользователя (USERPROFILE)",
+    "claude.err.badJson": "~/.claude/settings.json — недопустимый JSON ({v})",
+    "claude.err.notObject": "~/.claude/settings.json — не объект JSON",
+    "claude.err.hooksShape": "«hooks» в ~/.claude/settings.json — не объект со списками"
   }
 }

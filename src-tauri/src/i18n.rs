@@ -104,7 +104,8 @@ mod tests {
         let used = [
             "tray.apply", "tray.checking", "tray.downloading", "tray.check", "tray.settings", "tray.autostart", "tray.quit",
             "settings.title", "update.notifTitle", "update.notifBody", "alert.charging", "alert.onBattery",
-            "alert.lowBattery", "alert.connected", "alert.disconnected", "shot.file",
+            "alert.lowBattery", "alert.connected", "alert.disconnected", "shot.file", "claude.err.noProfile",
+            "claude.err.badJson", "claude.err.notObject", "claude.err.hooksShape",
         ];
         for l in [Lang::Ro, Lang::En, Lang::Ru] {
             for k in used {

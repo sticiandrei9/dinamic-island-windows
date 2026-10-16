@@ -39,7 +39,9 @@ pub fn push_history(mut list: Vec<String>, text: &str, max: usize) -> Vec<String
 /// Managerele de parole și aplicațiile bancare își marchează copierile cu aceste formate.
 pub fn excluded(formats: &[String], can_include: Option<u32>) -> bool {
     can_include == Some(0)
-        || formats.iter().any(|f| f == "ExcludeClipboardContentFromMonitorProcessing" || f == "Clipboard Viewer Ignore")
+        || formats.iter().any(|f| {
+            f.eq_ignore_ascii_case("ExcludeClipboardContentFromMonitorProcessing") || f.eq_ignore_ascii_case("Clipboard Viewer Ignore")
+        })
 }
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -232,6 +234,9 @@ mod tests {
     fn parole_excluse() {
         assert!(excluded(&["ExcludeClipboardContentFromMonitorProcessing".into()], None));
         assert!(excluded(&["Clipboard Viewer Ignore".into()], None));
+        // numele formatelor înregistrate nu țin cont de majuscule (RegisterClipboardFormatW)
+        assert!(excluded(&["clipboard viewer ignore".into()], None));
+        assert!(excluded(&["EXCLUDECLIPBOARDCONTENTFROMMONITORPROCESSING".into()], None));
         assert!(excluded(&[], Some(0)));
         assert!(!excluded(&["CF_UNICODETEXT".into()], Some(1)));
         assert!(!excluded(&[], None));

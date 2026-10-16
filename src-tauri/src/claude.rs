@@ -14,6 +14,7 @@ use windows::Win32::Storage::FileSystem::{
     FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification, FILE_NOTIFY_CHANGE_FILE_NAME,
     FILE_NOTIFY_CHANGE_LAST_WRITE,
 };
+use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION};
 
 use crate::claude_hook::{self, HookStatus, SessionFile};
@@ -48,12 +49,13 @@ fn project_name(cwd: &str) -> String {
 }
 
 /// Sesiunile care se mai arată (`working`/`waiting`/`done`, cu proces viu sau, fără pid, recente)
-/// și id-urile ale căror fișiere se șterg (proces mort sau mai vechi de 24 h).
-pub fn live_sessions(files: Vec<(String, SessionFile)>, now: u64, alive: impl Fn(u32) -> bool) -> (Vec<Session>, Vec<String>) {
+/// și id-urile ale căror fișiere se șterg (proces mort, mai vechi de 24 h sau de dinainte de pornirea Windows
+/// la `boot` ms unix: pid-ul poate fi refolosit de alt proces după repornire).
+pub fn live_sessions(files: Vec<(String, SessionFile)>, now: u64, boot: u64, alive: impl Fn(u32) -> bool) -> (Vec<Session>, Vec<String>) {
     let (mut shown, mut stale) = (Vec::new(), Vec::new());
     for (id, f) in files {
         let age = now.saturating_sub(f.at);
-        if age > DELETE_AFTER_MS || (f.pid != 0 && !alive(f.pid)) {
+        if age > DELETE_AFTER_MS || f.at < boot || (f.pid != 0 && !alive(f.pid)) {
             stale.push(id);
             continue;
         }
@@ -168,7 +170,9 @@ pub fn spawn(app: AppHandle) {
             if watch.is_none() {
                 watch = Watch::new(&dir);
             }
-            let (live, stale) = live_sessions(read_sessions(&dir), now_ms(), pid_alive);
+            let now = now_ms();
+            let boot = now.saturating_sub(unsafe { GetTickCount64() });
+            let (live, stale) = live_sessions(read_sessions(&dir), now, boot, pid_alive);
             for id in stale {
                 let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
             }
@@ -279,6 +283,7 @@ mod tests {
                 ("vechi".into(), f("done", 10, now - 25 * 3_600_000)),
             ],
             now,
+            0,
             |pid| pid == 10,
         );
         assert_eq!(vis.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["viu"]);
@@ -296,10 +301,29 @@ mod tests {
                 ("asteapta".into(), file("waiting", 10, now - 5 * 3_600_000)),
             ],
             now,
+            0,
             |_| true,
         );
         assert_eq!(vis.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["lucreaza", "asteapta"]);
         assert!(del.is_empty()); // ascunsă, nu ștearsă: următorul eveniment o readuce
+    }
+
+    #[test]
+    fn fisierele_de_dinainte_de_pornirea_windows_se_sterg() {
+        let now = 100 * 3_600_000;
+        let boot = now - 3_600_000; // Windows pornit acum o oră
+        let (vis, del) = live_sessions(
+            vec![
+                // „waiting” de dinainte de repornire, cu un pid refolosit de alt proces viu
+                ("inainte".into(), file("waiting", 10, boot - 60_000)),
+                ("dupa".into(), file("waiting", 10, boot + 60_000)),
+            ],
+            now,
+            boot,
+            |_| true,
+        );
+        assert_eq!(vis.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["dupa"]);
+        assert_eq!(del, ["inainte"]);
     }
 
     #[test]
@@ -310,6 +334,7 @@ mod tests {
         let body = serde_json::to_vec(&file("working", 10, 5)).unwrap();
         std::fs::write(d.join("a.json"), &body).unwrap();
         std::fs::write(d.join("x.json.tmp"), &body).unwrap();
+        std::fs::write(d.join("x.4242.json.tmp"), &body).unwrap(); // temporarul hook-ului, cu pid-ul lui
         let got = read_sessions(&d);
         std::fs::remove_dir_all(&d).unwrap();
         assert_eq!(got.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["a"]);

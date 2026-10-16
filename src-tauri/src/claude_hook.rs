@@ -130,7 +130,7 @@ pub fn sessions_dir() -> PathBuf {
 // ---------- IO pe settings.json ----------
 
 fn settings_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("USERPROFILE").ok_or("USERPROFILE lipsește")?;
+    let home = std::env::var_os("USERPROFILE").ok_or_else(|| crate::i18n::t("claude.err.noProfile"))?;
     Ok(PathBuf::from(home).join(".claude").join("settings.json"))
 }
 
@@ -144,15 +144,20 @@ fn load(path: &Path) -> Result<Value, String> {
     if text.trim().is_empty() {
         return Ok(json!({}));
     }
-    let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    if v.is_object() { Ok(v) } else { Err("settings.json nu e un obiect JSON".into()) }
+    let v: Value = serde_json::from_str(&text).map_err(|e| crate::i18n::tv("claude.err.badJson", &e.to_string()))?;
+    if v.is_object() { Ok(v) } else { Err(crate::i18n::t("claude.err.notObject")) }
+}
+
+/// `<nume>.<pid>.json.tmp`: fiecare proces hook are temporarul lui.
+fn tmp_path(path: &Path, pid: u32) -> PathBuf {
+    path.with_extension(format!("{pid}.json.tmp"))
 }
 
 fn write_atomic(path: &Path, v: &Value) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = tmp_path(path, std::process::id());
     let text = serde_json::to_string_pretty(v).map_err(|e| e.to_string())? + "\n";
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| {
@@ -165,7 +170,7 @@ pub fn install_at(path: &Path, exe: &str) -> Result<(), String> {
     let v = load(path)?;
     let out = add_hooks(v.clone(), exe);
     if !has_hooks(&out) {
-        return Err("structura „hooks” din settings.json nu e un obiect de liste".into());
+        return Err(crate::i18n::t("claude.err.hooksShape"));
     }
     if out != v { write_atomic(path, &out) } else { Ok(()) }
 }
@@ -386,6 +391,12 @@ mod tests {
         }
         assert!(session_file_name("com10").is_some());
         assert!(session_file_name("console").is_some());
+    }
+
+    #[test]
+    fn temporarul_poarta_pidul_hookului() {
+        // hook-uri PostToolUse paralele pe aceeași sesiune nu-și calcă temporarul; watcher-ul ignoră `.tmp`
+        assert_eq!(tmp_path(Path::new("d/abc.json"), 4242), Path::new("d/abc.4242.json.tmp"));
     }
 
     #[test]

@@ -111,7 +111,8 @@ body.transient #transient {
 #transient[data-kind="volume"] .t-volume,
 #transient[data-kind="notification"] .t-notif,
 #transient[data-kind="screenshot"] .t-shot,
-#transient[data-kind="download"] .t-download { display: flex; }
+#transient[data-kind="download"] .t-download,
+#transient[data-kind="unlock"] .t-unlock { display: flex; }
 body.transient #transient[data-kind="screenshot"], body.transient #transient[data-kind="claude"], body.transient #transient[data-kind="download"] { pointer-events: auto; }
 body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .t-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--t-color, var(--fg)); }
@@ -156,6 +157,10 @@ body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .d-file { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: rgba(255, 255, 255, .1); color: var(--green); cursor: grab; touch-action: none; }
 .d-file svg { width: 20px; height: 20px; pointer-events: none; }
 .t-download .pill-btn { flex: none; padding: 5px 10px; }
+/* lacătul la deblocare: apare cu fade + blur + scale; arcul îl mișcă unlock-view.js (Spring) */
+.t-unlock { justify-content: center; }
+#u-lock { width: 20px; height: 20px; overflow: visible; color: var(--fg); animation: unlock-in .45s cubic-bezier(.2, 1.2, .4, 1); }
+@keyframes unlock-in { from { opacity: 0; filter: blur(6px); transform: scale(.6); } }
 .s-close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: var(--fg2); font-size: 14px; line-height: 22px; cursor: pointer; }
 
 /* ---------- extins ---------- */

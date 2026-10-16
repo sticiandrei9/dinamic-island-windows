@@ -23,6 +23,7 @@ mod settings;
 mod shelf;
 mod timer;
 mod tray;
+mod unlock;
 mod updater;
 mod volume;
 mod windows_list;
@@ -136,6 +137,7 @@ fn main() {
             hittest::spawn(app.handle().clone());
             claude::spawn(app.handle().clone());
             downloads::spawn(app.handle().clone());
+            unlock::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());

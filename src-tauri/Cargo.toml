@@ -51,6 +51,7 @@ features = [
   "Win32_System_Memory",
   "Win32_System_Ole",
   "Win32_System_Power",
+  "Win32_System_RemoteDesktop",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",

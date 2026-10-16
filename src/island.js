@@ -239,6 +239,8 @@ function renderTransient(t) {
     $('s-size').textContent = `${t.width} × ${t.height}`;
   } else if (t.kind === 'download') {
     window.dispatchEvent(new CustomEvent('download-show', { detail: t })); // rândul îl umple downloads-view
+  } else if (t.kind === 'unlock') {
+    window.dispatchEvent(new Event('unlock-show')); // arcul lacătului îl animă unlock-view
   } else if (t.kind === 'notification') {
     $('n-icon').src = t.icon ?? '';
     $('n-app').textContent = t.app ?? '';
@@ -507,6 +509,7 @@ function startDemo() {
     at(7200, 'downloads-demo', []);
     at(7200, 'download-done-demo', { name: file, path: `C:\\Users\\Andrei\\Downloads\\${file}`, bytes: 45_000_000 });
   }
+  if (p.has('unlock')) setTimeout(() => island.pushTransient({ kind: 'unlock', duration: 1600, urgent: true }), 1500);
   if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);
 }
 async function demoInvoke(cmd, args) {

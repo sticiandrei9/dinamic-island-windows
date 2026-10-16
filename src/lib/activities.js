@@ -2,7 +2,7 @@
 // Persistente (timer, media): concurează pentru pastilă; a doua apare ca bulă.
 // Tranzitorii (alertă, volum, notificare, update): o coadă, afișate pe rând, fiecare `duration` ms.
 
-const PRIORITY = { call: 4, timer: 3, stopwatch: 3, meeting: 2.5, media: 2 };
+const PRIORITY = { call: 4, timer: 3, stopwatch: 3, 'claude-waiting': 2.8, meeting: 2.5, download: 2.2, media: 2, claude: 1.5, sleep: 1 };
 
 export function layout(persistent) {
   const sorted = [...persistent].sort((a, b) => (PRIORITY[b.kind] ?? 0) - (PRIORITY[a.kind] ?? 0));

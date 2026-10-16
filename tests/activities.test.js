@@ -100,3 +100,12 @@ test('confirmările urgente trec în fața notificărilor din coadă', () => {
   assert.equal(current(q, 20).kind, 'alert');
   assert.equal(q.length, 3);
 });
+
+test('prioritățile modulelor noi', () => {
+  const k = (kind) => ({ id: kind, kind });
+  assert.equal(layout([k('media'), k('claude')]).pill.kind, 'media');
+  assert.equal(layout([k('media'), k('claude-waiting')]).pill.kind, 'claude-waiting');
+  assert.equal(layout([k('media'), k('download')]).pill.kind, 'download');
+  assert.equal(layout([k('sleep'), k('media')]).bubble.kind, 'sleep');
+  assert.equal(layout([k('timer'), k('download')]).pill.kind, 'timer');
+});

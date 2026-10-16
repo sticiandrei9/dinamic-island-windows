@@ -12,7 +12,7 @@ const EAR = 7;
 const BUBBLE = 32;
 const GAP = 8;
 // lățimea pastilei compacte după activitatea din ea
-const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250, call: 270, meeting: 300 };
+const COMPACT_W = { '': 190, media: 300, timer: 250, stopwatch: 250, call: 270, meeting: 300, claude: 250, 'claude-waiting': 250, download: 300, sleep: 220 };
 // mărimea insulei pentru fiecare tip de activitate tranzitorie
 const TRANSIENT = {
   alert: { w: 340, h: 40, r: 18 },
@@ -21,8 +21,12 @@ const TRANSIENT = {
   volume: { w: 310, h: 36, r: 16 },
   notification: { w: 400, h: 78, r: 26 },
   screenshot: { w: 480, h: 80, r: 26 },
+  claude: { w: 340, h: 40, r: 18 },
+  download: { w: 420, h: 64, r: 24 },
+  unlock: { w: 190, h: 32, r: 10 },
+  clip: { w: 340, h: 36, r: 16 },
 };
-const EXPANDED_W = { home: 420, timer: 440, shelf: 440, mirror: 360 };
+const EXPANDED_W = { home: 420, timer: 440, shelf: 440, mirror: 360, system: 420, clipboard: 420, notes: 400 };
 const SPRING = { response: 0.5, damping: 0.72 };
 
 const tauri = window.__TAURI__;
@@ -242,7 +246,7 @@ function renderTransient(t) {
 }
 
 // ---------------- file ----------------
-const TAB_ORDER = ['home', 'timer', 'shelf', 'mirror'];
+const TAB_ORDER = ['home', 'timer', 'system', 'clipboard', 'notes', 'shelf', 'mirror'];
 function availableTabs() {
   return [...panes.entries()]
     .filter(([, p]) => !p.module || settings?.modules?.[p.module] !== false)
@@ -436,7 +440,7 @@ renderTabs();
 retarget();
 
 // modulele noi se încarcă după ce API-ul insulei există
-for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './screenshot-view.js', './shelf-view.js', './mirror-view.js', './output-view.js', './calendar-view.js']) {
+for (const mod of ['./lyrics-view.js', './timer-view.js', './privacy-view.js', './alerts-view.js', './volume-view.js', './notifications-view.js', './screenshot-view.js', './shelf-view.js', './mirror-view.js', './output-view.js', './calendar-view.js', './claude-view.js', './downloads-view.js', './unlock-view.js', './system-view.js', './clipboard-view.js', './sleep-view.js', './notes-view.js']) {
   import(mod)
     .then((m) => {
       m.init?.(island);

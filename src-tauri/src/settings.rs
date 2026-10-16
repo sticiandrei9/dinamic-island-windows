@@ -34,6 +34,13 @@ pub struct Modules {
     pub network: bool,
     pub output: bool,
     pub calendar: bool,
+    pub claude: bool,
+    pub downloads: bool,
+    pub unlock: bool,
+    pub system: bool,
+    pub clipboard: bool,
+    pub sleep: bool,
+    pub notes: bool,
 }
 
 impl Default for Modules {
@@ -42,6 +49,7 @@ impl Default for Modules {
             media: true, lyrics: true, apps: true, timer: true, privacy: true,
             alerts: true, volume: true, notifications: true, calls: true, screenshots: true, shelf: true, mirror: true,
             keyboard: true, network: true, output: true, calendar: true,
+            claude: false, downloads: true, unlock: true, system: true, clipboard: false, sleep: true, notes: true,
         }
     }
 }
@@ -103,6 +111,9 @@ pub struct Settings {
     /// linkul secret iCal (Google Calendar); gol = fără calendar
     #[serde(deserialize_with = "lenient")]
     pub calendar_url: String,
+    /// scurtătura care deschide notițele; goală = niciuna (sugestia din Setări: Win+Shift+N)
+    #[serde(deserialize_with = "lenient")]
+    pub notes_hotkey: String,
 }
 
 impl Default for Settings {
@@ -119,6 +130,7 @@ impl Default for Settings {
             hotkey: String::new(),
             shelf_days: 0,
             calendar_url: String::new(),
+            notes_hotkey: String::new(),
         }
     }
 }
@@ -319,5 +331,24 @@ mod tests {
         assert_eq!(Size::Small.scale(), 0.85);
         assert_eq!(Size::Normal.scale(), 1.0);
         assert_eq!(Size::Large.scale(), 1.15);
+    }
+
+    #[test]
+    fn module_noi_implicite() {
+        let m = Settings::default().modules;
+        assert!(!m.claude && !m.clipboard);
+        assert!(m.downloads && m.unlock && m.system && m.sleep && m.notes);
+        assert!(Settings::default().notes_hotkey.is_empty());
+    }
+
+    #[test]
+    fn setari_v043_primesc_implicitele_noi() {
+        // modules din v0.4.3, fara cheile noi
+        let s: Settings = serde_json::from_str(r#"{"modules":{"media":true,"lyrics":false,"apps":true,"timer":true,"privacy":true,"alerts":true,"volume":true,"notifications":true,"calls":true,"screenshots":true,"shelf":true,"mirror":true,"keyboard":true,"network":true,"output":true,"calendar":true},"hotkey":"Ctrl+Shift+I"}"#).unwrap();
+        assert!(!s.modules.lyrics);
+        assert!(!s.modules.claude && !s.modules.clipboard);
+        assert!(s.modules.downloads && s.modules.notes);
+        assert_eq!(s.hotkey, "Ctrl+Shift+I");
+        assert!(s.notes_hotkey.is_empty());
     }
 }

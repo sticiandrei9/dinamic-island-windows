@@ -127,7 +127,7 @@ pub fn sync_windows(app: &AppHandle) {
         if fresh {
             // până raportează interfața dreptunghiul insulei, fereastra nu blochează click-urile
             let _ = win.set_ignore_cursor_events(true);
-            platform::make_no_activate(&win);
+            platform::set_no_activate(&win, true);
             if let Some(&owner) = OWNER.get() {
                 platform::set_owner(&win, owner);
             }

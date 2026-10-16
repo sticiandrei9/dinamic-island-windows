@@ -15,6 +15,7 @@ mod keyboard;
 mod lyrics;
 mod media;
 mod mic;
+mod notes;
 mod notifications;
 mod output;
 mod platform;
@@ -120,6 +121,12 @@ fn main() {
             clipboard::clipboard_list,
             clipboard::clipboard_copy,
             clipboard::clipboard_clear,
+            notes::notes_list,
+            notes::notes_add,
+            notes::notes_toggle,
+            notes::notes_remove,
+            notes::notes_clear_done,
+            notes::notes_focus,
         ])
         .setup(|app| {
             log::info!("Dynamic Island {} pornit", app.package_info().version);
@@ -133,8 +140,10 @@ fn main() {
             i18n::set_current(loaded.lang());
             tray::sync_autostart(app.handle(), loaded.autostart);
             let loaded_hotkey = loaded.hotkey.clone();
+            let loaded_notes_hotkey = loaded.notes_hotkey.clone();
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
             app.manage(shelf::ShelfState::load(app.path().app_config_dir()?.join("shelf.json")));
+            app.manage(notes::NotesState::load(app.path().app_config_dir()?.join("notes.json")));
 
             updater::install_pending_at_startup(app.handle());
             displays::init_owner();
@@ -154,6 +163,9 @@ fn main() {
             hotkey::spawn(app.handle().clone());
             if !loaded_hotkey.is_empty() {
                 hotkey::apply_and_report(&loaded_hotkey);
+            }
+            if !loaded_notes_hotkey.is_empty() {
+                hotkey::apply_notes_and_report(&loaded_notes_hotkey);
             }
             dev_demo::spawn(app.handle().clone());
             volume::spawn(app.handle().clone());

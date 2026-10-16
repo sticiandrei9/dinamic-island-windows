@@ -2,6 +2,7 @@ use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS};
@@ -31,31 +32,40 @@ pub fn parse(combo: &str) -> Option<(u32, u32)> {
     if mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) == 0 { None } else { Some((mods | MOD_NOREPEAT, vk?)) }
 }
 
+/// Id-urile scurtăturilor înregistrate pe thread-ul lor.
+const ID_ISLAND: i32 = 1;
+const ID_NOTES: i32 = 2;
+
 struct Worker {
     thread: u32,
-    tx: SyncSender<(String, SyncSender<bool>)>,
+    tx: SyncSender<(i32, String, SyncSender<bool>)>,
 }
 
 static WORKER: OnceLock<Worker> = OnceLock::new();
 
-/// Thread-ul care ține scurtătura înregistrată (WM_HOTKEY ajunge doar la thread-ul care a înregistrat-o).
+/// Thread-ul care ține scurtăturile înregistrate (WM_HOTKEY ajunge doar la thread-ul care le-a înregistrat).
 pub fn spawn(app: AppHandle) {
-    let (tx, rx) = sync_channel::<(String, SyncSender<bool>)>(4);
+    let (tx, rx) = sync_channel::<(i32, String, SyncSender<bool>)>(4);
     let (ready_tx, ready_rx) = sync_channel(1);
     std::thread::spawn(move || {
         let _ = ready_tx.send(unsafe { GetCurrentThreadId() });
-        let mut registered = false;
+        let mut registered = [false; 3]; // după id (indicii 1 și 2)
         let mut msg = MSG::default();
         while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
             if msg.message == WM_HOTKEY {
-                toggle(&app);
+                match msg.wParam.0 as i32 {
+                    ID_ISLAND => toggle(&app),
+                    ID_NOTES => open_notes(&app),
+                    _ => {}
+                }
             } else if msg.message == WM_APP {
-                while let Ok((combo, reply)) = rx.try_recv() {
-                    if registered {
-                        let _ = unsafe { UnregisterHotKey(None, 1) };
+                while let Ok((id, combo, reply)) = rx.try_recv() {
+                    let slot = &mut registered[id as usize];
+                    if *slot {
+                        let _ = unsafe { UnregisterHotKey(None, id) };
                     }
-                    registered = parse(&combo).is_some_and(|(m, vk)| unsafe { RegisterHotKey(None, 1, HOT_KEY_MODIFIERS(m), vk) }.is_ok());
-                    let _ = reply.send(registered || combo.trim().is_empty());
+                    *slot = parse(&combo).is_some_and(|(m, vk)| unsafe { RegisterHotKey(None, id, HOT_KEY_MODIFIERS(m), vk) }.is_ok());
+                    let _ = reply.send(*slot || combo.trim().is_empty());
                 }
             }
         }
@@ -65,11 +75,20 @@ pub fn spawn(app: AppHandle) {
     }
 }
 
-/// Înregistrează scurtătura (goală = niciuna). False dacă Windows o refuză (ocupată de alt program).
+/// Înregistrează scurtătura insulei (goală = niciuna). False dacă Windows o refuză (ocupată de alt program).
 pub fn apply(combo: &str) -> bool {
+    apply_id(ID_ISLAND, combo)
+}
+
+/// La fel, pentru scurtătura care deschide notițele.
+pub fn apply_notes(combo: &str) -> bool {
+    apply_id(ID_NOTES, combo)
+}
+
+fn apply_id(id: i32, combo: &str) -> bool {
     let Some(w) = WORKER.get() else { return false };
     let (reply_tx, reply_rx) = sync_channel(1);
-    if w.tx.send((combo.to_string(), reply_tx)).is_err() {
+    if w.tx.send((id, combo.to_string(), reply_tx)).is_err() {
         return false;
     }
     // thread-ul poate să nu aibă încă o coadă de mesaje: reîncercăm trezirea până răspunde
@@ -82,25 +101,43 @@ pub fn apply(combo: &str) -> bool {
     false
 }
 
-static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+/// Ultima combinație refuzată de Windows pentru fiecare scurtătură (pentru Setări).
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct HotkeyErrors {
+    pub island: Option<String>,
+    pub notes: Option<String>,
+}
 
-/// Ultima scurtătură refuzată de Windows (pentru Setări).
+static LAST_ERROR: Mutex<HotkeyErrors> = Mutex::new(HotkeyErrors { island: None, notes: None });
+
 #[tauri::command]
-pub fn hotkey_error() -> Option<String> {
+pub fn hotkey_error() -> HotkeyErrors {
     LAST_ERROR.lock().unwrap().clone()
 }
 
-pub fn apply_and_report(combo: &str) {
-    let ok = apply(combo);
+fn record(errors: &mut HotkeyErrors, id: i32, combo: &str, ok: bool) {
+    let slot = if id == ID_NOTES { &mut errors.notes } else { &mut errors.island };
+    *slot = (!ok).then(|| combo.to_string());
+}
+
+fn report(id: i32, combo: &str, ok: bool) {
     if !ok {
         log::warn!("scurtătura {combo} n-a putut fi înregistrată (ocupată de alt program?)");
     }
-    *LAST_ERROR.lock().unwrap() = (!ok).then(|| combo.to_string());
+    record(&mut LAST_ERROR.lock().unwrap(), id, combo, ok);
 }
 
-/// Deschide/strânge insula de pe monitorul cu cursorul. Doar Win32 aici: API-urile Tauri de monitor
+pub fn apply_and_report(combo: &str) {
+    report(ID_ISLAND, combo, apply(combo));
+}
+
+pub fn apply_notes_and_report(combo: &str) {
+    report(ID_NOTES, combo, apply_notes(combo));
+}
+
+/// Insula de pe monitorul cu cursorul (sau prima). Doar Win32 aici: API-urile Tauri de monitor
 /// așteaptă thread-ul principal, care poate aștepta chiar acum după acest thread (`apply`).
-fn toggle(app: &AppHandle) {
+fn cursor_island(app: &AppHandle) -> Option<String> {
     use windows::Win32::Foundation::{POINT, RECT};
     use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MonitorFromRect, MONITOR_DEFAULTTONEAREST};
     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
@@ -111,8 +148,20 @@ fn toggle(app: &AppHandle) {
         let mut r = RECT::default();
         unsafe { GetWindowRect(hwnd, &mut r).is_ok() && MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST) == mon }
     });
-    if let Some(w) = on_cursor.or(windows.first()) {
-        let _ = app.emit_to(w.label(), "island-toggle", ());
+    on_cursor.or(windows.first()).map(|w| w.label().to_string())
+}
+
+/// Deschide/strânge insula de pe monitorul cu cursorul.
+fn toggle(app: &AppHandle) {
+    if let Some(label) = cursor_island(app) {
+        let _ = app.emit_to(label.as_str(), "island-toggle", ());
+    }
+}
+
+/// Scurtătura notițelor: insula se deschide pe fila Notițe, cu câmpul de scris activ (JS cere focusul).
+fn open_notes(app: &AppHandle) {
+    if let Some(label) = cursor_island(app) {
+        let _ = app.emit_to(label.as_str(), "island-notes", ());
     }
 }
 
@@ -126,6 +175,22 @@ mod tests {
         assert_eq!(parse("Ctrl+Alt+Space"), Some((MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x20)));
         assert_eq!(parse("ctrl+f5"), Some((MOD_CONTROL | MOD_NOREPEAT, 0x74)));
         assert_eq!(parse("Alt+7"), Some((MOD_ALT | MOD_NOREPEAT, '7' as u32)));
+    }
+
+    #[test]
+    fn doua_scurtaturi_distincte() {
+        assert_eq!(parse("Win+Shift+N"), Some((MOD_WIN | MOD_SHIFT | MOD_NOREPEAT, b'N' as u32)));
+        assert_ne!(ID_ISLAND, ID_NOTES);
+    }
+
+    #[test]
+    fn erorile_celor_doua_scurtaturi_sunt_separate() {
+        let mut e = HotkeyErrors::default();
+        record(&mut e, ID_NOTES, "Win+Shift+N", false);
+        assert_eq!(e, HotkeyErrors { island: None, notes: Some("Win+Shift+N".into()) });
+        record(&mut e, ID_ISLAND, "Win+Shift+I", false);
+        record(&mut e, ID_NOTES, "Win+Shift+N", true); // înregistrată acum: eroarea ei dispare
+        assert_eq!(e, HotkeyErrors { island: Some("Win+Shift+I".into()), notes: None });
     }
 
     #[test]

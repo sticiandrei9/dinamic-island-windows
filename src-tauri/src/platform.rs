@@ -7,8 +7,8 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
-    SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE,
+    GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindow,
+    SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE,
 };
 
 /// COM inițializat pe thread-ul curent cât trăiește garda; `CoUninitialize` doar dacă inițializarea a reușit
@@ -34,14 +34,48 @@ pub fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
     win.hwnd().ok().map(|h| HWND(h.0 as *mut core::ffi::c_void))
 }
 
-/// Click-urile pe insulă nu fură focusul aplicației active.
-pub fn make_no_activate(win: &WebviewWindow) {
-    if let Some(h) = hwnd_of(win) {
-        unsafe {
-            let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-            let extra = WS_EX_NOACTIVATE.0 as isize;
-            SetWindowLongPtrW(h, GWL_EXSTYLE, ex | extra);
+/// `WS_EX_NOACTIVATE` pe insulă (click-urile n-o activează, deci nu fură focusul aplicației active) sau scos.
+/// Trece prin `set_focusable` al lui tao, nu prin `SetWindowLongPtrW`: tao recalculează tot stilul extins din
+/// steagurile lui la orice schimbare (de ex. `set_ignore_cursor_events`, care comută la fiecare intrare/ieșire
+/// a cursorului) și ar șterge un bit pus de mână. Stilul rămâne cel al ferestrei fără margini, deci fără bară de titlu.
+pub fn set_no_activate(win: &WebviewWindow, on: bool) {
+    let _ = win.set_focusable(!on);
+}
+
+/// Dă insulei focusul de tastatură pentru câmpul de notițe: scoate `WS_EX_NOACTIVATE`, se atașează la
+/// input-ul ferestrei din prim-plan (altfel Windows refuză `SetForegroundWindow`, ca în `focus_hwnd`),
+/// activează insula și îi dă focusul. Întoarce fereastra din prim-plan de dinainte. Doar pe thread-ul
+/// principal: `SetFocus` merge doar pe thread-ul care deține fereastra.
+pub fn activate_for_typing(win: &WebviewWindow) -> Option<isize> {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    let me = hwnd_of(win)?;
+    set_no_activate(win, false);
+    unsafe {
+        let fg = GetForegroundWindow();
+        let prev = (!fg.0.is_null() && fg != me).then_some(fg.0 as isize);
+        let fg_tid = if fg.0.is_null() { 0 } else { GetWindowThreadProcessId(fg, None) };
+        let me_tid = GetCurrentThreadId();
+        let attached = fg_tid != 0 && fg_tid != me_tid && AttachThreadInput(me_tid, fg_tid, true).as_bool();
+        let _ = SetForegroundWindow(me);
+        let _ = SetFocus(me);
+        if attached {
+            let _ = AttachThreadInput(me_tid, fg_tid, false);
         }
+        prev
+    }
+}
+
+/// Fereastra de dinainte există încă și insula e în continuare în prim-plan (altfel utilizatorul a ales
+/// între timp altă fereastră și nu i-o luăm).
+pub fn can_refocus(prev: isize, win: &WebviewWindow) -> bool {
+    unsafe { IsWindow(HWND(prev as *mut core::ffi::c_void)).as_bool() && Some(GetForegroundWindow()) == hwnd_of(win) }
+}
+
+/// Redă focusul ferestrei de dinainte (insula e în prim-plan, deci Windows permite).
+pub fn focus_previous(prev: isize) {
+    unsafe {
+        let _ = SetForegroundWindow(HWND(prev as *mut core::ffi::c_void));
     }
 }
 

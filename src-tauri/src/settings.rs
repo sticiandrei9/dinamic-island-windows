@@ -221,6 +221,9 @@ pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, mut sett
     if previous.hotkey != settings.hotkey {
         crate::hotkey::apply_and_report(&settings.hotkey);
     }
+    if previous.notes_hotkey != settings.notes_hotkey {
+        crate::hotkey::apply_notes_and_report(&settings.notes_hotkey);
+    }
     if previous.language != settings.language {
         crate::i18n::set_current(settings.lang());
         crate::tray::refresh_texts(&app);

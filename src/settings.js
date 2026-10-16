@@ -76,12 +76,19 @@ function renderControls() {
   document.getElementById('shelf-days').value = String(settings.shelf_days ?? 0);
   const cal = document.getElementById('calendar-url');
   if (document.activeElement !== cal) cal.value = settings.calendar_url ?? '';
-  if (!recording) document.getElementById('hotkey').textContent = settings.hotkey || t('settings.hotkeyNone');
-  document.getElementById('hotkey-clear').hidden = !settings.hotkey;
+  for (const h of HOTKEYS) {
+    if (recording !== h) document.getElementById(h.id).textContent = settings[h.key] || t('settings.hotkeyNone');
+    document.getElementById(`${h.id}-clear`).hidden = !settings[h.key];
+  }
 }
 
-// scurtătura: butonul ascultă următoarea combinație (cel puțin un modificator + o tastă)
-let recording = false;
+// scurtăturile (insula și notițele): butonul ascultă următoarea combinație (cel puțin un modificator + o tastă).
+// `err` = câmpul din `hotkey_error`; `hint` = textul de sub nume când scurtătura nu e refuzată de Windows
+const HOTKEYS = [
+  { key: 'hotkey', id: 'hotkey', err: 'island', hint: () => t('settings.hotkeyHint') },
+  { key: 'notes_hotkey', id: 'notes-hotkey', err: 'notes', hint: () => t('settings.notesHotkeyHint', { combo: 'Win+Shift+N' }) },
+];
+let recording = null; // scurtătura care ascultă acum
 
 function comboFrom(e) {
   const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : /^Digit\d$/.test(e.code) ? e.code.slice(5) : /^F\d{1,2}$/.test(e.code) ? e.code : e.code === 'Space' ? 'Space' : null;
@@ -91,30 +98,37 @@ function comboFrom(e) {
   return mods.some((m) => m !== 'Shift') ? [...mods, key].join('+') : null;
 }
 async function showHotkeyError() {
-  const busy = await invoke('hotkey_error').catch(() => null);
-  const hint = document.getElementById('hotkey-hint');
-  hint.textContent = busy && busy === settings.hotkey ? t('settings.hotkeyBusy') : t('settings.hotkeyHint');
-  hint.classList.toggle('error', !!busy && busy === settings.hotkey);
+  const errors = (await invoke('hotkey_error').catch(() => null)) ?? {};
+  for (const h of HOTKEYS) {
+    const busy = errors[h.err];
+    const refused = !!busy && busy === settings[h.key];
+    const hint = document.getElementById(`${h.id}-hint`);
+    hint.textContent = refused ? t('settings.hotkeyBusy') : h.hint();
+    hint.classList.toggle('error', refused);
+  }
 }
-document.getElementById('hotkey').addEventListener('click', (e) => {
-  recording = true;
-  e.target.classList.add('recording');
-  e.target.textContent = t('settings.hotkeyPress');
-});
+for (const h of HOTKEYS) {
+  document.getElementById(h.id).addEventListener('click', (e) => {
+    recording = h;
+    e.target.classList.add('recording');
+    e.target.textContent = t('settings.hotkeyPress');
+  });
+  document.getElementById(`${h.id}-clear`).addEventListener('click', () => { settings[h.key] = ''; renderControls(); save(); });
+}
 window.addEventListener('keydown', (e) => {
   if (!recording) return;
   e.preventDefault();
-  const btn = document.getElementById('hotkey');
-  if (e.key === 'Escape') { recording = false; btn.classList.remove('recording'); renderControls(); return; }
+  const h = recording;
+  const btn = document.getElementById(h.id);
+  if (e.key === 'Escape') { recording = null; btn.classList.remove('recording'); renderControls(); return; }
   const combo = comboFrom(e);
   if (!combo) return; // doar modificatori până acum
-  recording = false;
+  recording = null;
   btn.classList.remove('recording');
-  settings.hotkey = combo;
+  settings[h.key] = combo;
   renderControls();
   save();
 });
-document.getElementById('hotkey-clear').addEventListener('click', () => { settings.hotkey = ''; renderControls(); save(); });
 document.getElementById('shelf-days').addEventListener('change', (e) => { settings.shelf_days = Number(e.target.value); save(); });
 document.getElementById('calendar-url').addEventListener('change', async (e) => {
   settings.calendar_url = e.target.value.trim();

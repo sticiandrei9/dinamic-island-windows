@@ -77,6 +77,7 @@ export const island = {
   get settings() { return settings; },
   get expanded() { return expanded; },
   get shown() { return shown; },
+  get hovering() { return hovering; },
   lastScreenshotAt: 0,
   setActivity(id, activity) {
     if (activity) persistent.set(id, { id, ...activity });
@@ -522,6 +523,14 @@ function startDemo() {
     send(1000, { items: items.slice(1), new: false });
     send(1500, { items, new: true });
     setTimeout(() => island.expandTo('clipboard'), 4200);
+  }
+  if (p.has('notes')) {
+    // notițe inventate (notes-view.js): unele bifate, câmpul de scris vizibil
+    const at = Math.floor(Date.now() / 1000);
+    const list = [['Lapte și pâine', false], ['Sună la service pentru mașină', false], ['Trimite factura către contabil, cu toate anexele scanate și semnate de ambele părți, înainte de sfârșitul lunii', false], ['Cumpără cablu USB-C', true]]
+      .map(([text, done], i) => ({ id: i + 1, text, done, at: at - i * 60 }));
+    setTimeout(() => window.dispatchEvent(new CustomEvent('notes-demo', { detail: list })), 1000);
+    setTimeout(() => island.expandTo('notes'), 1200);
   }
   if (p.has('unlock')) setTimeout(() => island.pushTransient({ kind: 'unlock', duration: 1600, urgent: true }), 1500);
   if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);

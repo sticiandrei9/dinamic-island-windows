@@ -203,15 +203,19 @@ pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, mut sett
     if previous.autostart != settings.autostart && !crate::tray::apply_autostart(&app, settings.autostart) {
         settings.autostart = previous.autostart; // Windows a refuzat: setarea rămâne cum era
     }
-    // comutatorul Claude instalează / scoate hook-ul; dacă instalarea eșuează, rămâne oprit (motivul ajunge în Setări)
+    settings.save(&state.path).map_err(|e| e.to_string())?;
+    // comutatorul Claude instalează / scoate hook-ul, abia după ce setarea e salvată; dacă instalarea
+    // eșuează, comutatorul rămâne oprit (și se salvează din nou), iar motivul ajunge în Setări
     if previous.modules.claude != settings.modules.claude {
         if settings.modules.claude {
-            settings.modules.claude = crate::claude::install_hook() == crate::claude_hook::HookStatus::Installed;
+            if crate::claude::install_hook() != crate::claude_hook::HookStatus::Installed {
+                settings.modules.claude = false;
+                settings.save(&state.path).map_err(|e| e.to_string())?;
+            }
         } else {
             crate::claude::remove_hook();
         }
     }
-    settings.save(&state.path).map_err(|e| e.to_string())?;
     *state.current.lock().unwrap() = settings.clone();
     crate::tray::refresh_autostart_item(&app, settings.autostart);
     if previous.hotkey != settings.hotkey {

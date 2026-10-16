@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 const MARKER: &str = "--claude-hook";
-const EVENTS: [&str; 4] = ["UserPromptSubmit", "Notification", "Stop", "SessionEnd"];
+const EVENTS: [&str; 5] = ["UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"];
 
 /// Forma fișierului de sesiune (`<sessions_dir>/<session_id>.json`). `at` = ms unix;
 /// `pid` / `hwnd` sunt 0 când nu au fost găsite.
@@ -42,7 +42,8 @@ pub enum HookStatus {
 
 pub fn state_for(event: &str, notification_type: Option<&str>) -> Option<&'static str> {
     match (event, notification_type) {
-        ("UserPromptSubmit", _) => Some("working"),
+        // PostToolUse: după o aprobare sesiunea lucrează din nou (altfel ar rămâne „te așteaptă” până la Stop)
+        ("UserPromptSubmit" | "PostToolUse", _) => Some("working"),
         ("Notification", Some("permission_prompt" | "elicitation_dialog")) => Some("waiting"),
         ("Stop", _) => Some("done"),
         ("SessionEnd", _) => Some("end"),
@@ -321,7 +322,16 @@ mod tests {
         assert_eq!(state_for("Notification", Some("idle_prompt")), None);
         assert_eq!(state_for("Stop", None), Some("done"));
         assert_eq!(state_for("SessionEnd", None), Some("end"));
+        assert_eq!(state_for("PostToolUse", None), Some("working")); // după o aprobare, sesiunea revine la „lucrează”
         assert_eq!(state_for("PreToolUse", None), None);
+    }
+
+    #[test]
+    fn set_vechi_de_4_evenimente_apare_ca_lipsa() {
+        let mut v = add_hooks(json!({}), "di.exe");
+        v["hooks"].as_object_mut().unwrap().shift_remove("PostToolUse");
+        assert!(!has_hooks(&v));
+        assert!(has_hooks(&add_hooks(v, "di.exe"))); // reinstalarea îl adaugă
     }
 
     #[test]

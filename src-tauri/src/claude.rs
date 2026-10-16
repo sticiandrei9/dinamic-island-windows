@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::HSTRING;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{
     FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification, FILE_NOTIFY_CHANGE_FILE_NAME,
     FILE_NOTIFY_CHANGE_LAST_WRITE,
@@ -21,6 +21,8 @@ use crate::settings::SettingsState;
 
 /// Fără pid, o sesiune fără niciun eveniment atâta timp se consideră moartă.
 const NO_PID_MAX_MS: u64 = 30 * 60_000;
+/// `working` fără niciun eveniment (nici PostToolUse) atâta timp: probabil întreruptă, se ascunde (nu se șterge).
+const WORKING_IDLE_MS: u64 = 15 * 60_000;
 /// Fișierele mai vechi de atât se șterg oricum.
 const DELETE_AFTER_MS: u64 = 24 * 3_600_000;
 
@@ -56,7 +58,8 @@ pub fn live_sessions(files: Vec<(String, SessionFile)>, now: u64, alive: impl Fn
             continue;
         }
         let known = matches!(f.state.as_str(), "working" | "waiting" | "done");
-        if known && (f.pid != 0 || age <= NO_PID_MAX_MS) {
+        let fresh = if f.state == "working" { age <= WORKING_IDLE_MS } else { f.pid != 0 || age <= NO_PID_MAX_MS };
+        if known && fresh {
             shown.push(Session { project: project_name(&f.cwd), id, state: f.state, hwnd: f.hwnd, since: f.at });
         }
     }
@@ -95,11 +98,18 @@ impl Watch {
         unsafe { FindFirstChangeNotificationW(&path, false, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE) }.ok().map(Watch)
     }
 
-    /// Așteaptă o schimbare sau cel mult `ms`; rearmează înainte de scanare, ca nicio schimbare să nu se piardă.
-    fn wait(&self, ms: u32) {
+    /// Așteaptă o schimbare sau cel mult `ms`. După o schimbare mai așteaptă 100 ms (tmp + rename vin la rând),
+    /// apoi rearmează, înainte de scanare, ca nicio schimbare să nu se piardă.
+    /// `false` = mânerul nu mai merge (eroare): apelantul îl recreează, ca bucla să nu se rotească în gol.
+    fn wait(&self, ms: u32) -> bool {
         unsafe {
-            if WaitForSingleObject(self.0, ms) == WAIT_OBJECT_0 {
-                let _ = FindNextChangeNotification(self.0);
+            match WaitForSingleObject(self.0, ms) {
+                WAIT_OBJECT_0 => {
+                    std::thread::sleep(Duration::from_millis(100));
+                    FindNextChangeNotification(self.0).is_ok()
+                }
+                WAIT_TIMEOUT => true,
+                _ => false,
             }
         }
     }
@@ -163,9 +173,10 @@ pub fn spawn(app: AppHandle) {
                 let _ = app.emit("claude-sessions", &list);
                 last = Some(list);
             }
-            match &watch {
-                Some(w) => w.wait(2000),
-                None => std::thread::sleep(Duration::from_secs(2)),
+            // mâner stricat sau lipsă: îl recreăm la următoarea tură (cel vechi se închide prin Drop)
+            if !watch.as_ref().is_some_and(|w| w.wait(2000)) {
+                watch = None;
+                std::thread::sleep(Duration::from_secs(2));
             }
         }
     });
@@ -268,6 +279,35 @@ mod tests {
         assert_eq!(vis.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["viu"]);
         assert_eq!(vis[0].project, "proiect");
         assert!(del.contains(&"mort".to_string()) && del.contains(&"vechi".to_string()));
+    }
+
+    #[test]
+    fn lucreaza_vechi_se_ascunde_dar_asteptarea_ramane() {
+        let now = 100 * 3_600_000;
+        let (vis, del) = live_sessions(
+            vec![
+                ("lucreaza_vechi".into(), file("working", 10, now - 16 * 60_000)),
+                ("lucreaza".into(), file("working", 10, now - 14 * 60_000)),
+                ("asteapta".into(), file("waiting", 10, now - 5 * 3_600_000)),
+            ],
+            now,
+            |_| true,
+        );
+        assert_eq!(vis.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["lucreaza", "asteapta"]);
+        assert!(del.is_empty()); // ascunsă, nu ștearsă: următorul eveniment o readuce
+    }
+
+    #[test]
+    fn citeste_doar_json_nu_si_tmp() {
+        let d = std::env::temp_dir().join(format!("di-claude-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let body = serde_json::to_vec(&file("working", 10, 5)).unwrap();
+        std::fs::write(d.join("a.json"), &body).unwrap();
+        std::fs::write(d.join("x.json.tmp"), &body).unwrap();
+        let got = read_sessions(&d);
+        std::fs::remove_dir_all(&d).unwrap();
+        assert_eq!(got.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["a"]);
     }
 
     fn sess(id: &str, state: &str, since: u64) -> Session {

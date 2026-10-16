@@ -81,6 +81,7 @@ pub fn calendar_open(url: String) -> Result<(), String> {
     if !safe_link(&url) {
         return Err("link refuzat".into());
     }
+    crate::platform::allow_foreground();
     std::process::Command::new("explorer").raw_arg(format!("\"{url}\"")).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 

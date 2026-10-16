@@ -271,6 +271,7 @@ pub fn focus_hwnd(hwnd: isize) -> Result<(), String> {
         if !IsWindow(h).as_bool() {
             return Err("fereastra nu mai există".into());
         }
+        crate::platform::allow_foreground();
         if IsIconic(h).as_bool() {
             let _ = ShowWindow(h, SW_RESTORE);
         }

@@ -182,6 +182,7 @@ pub fn shelf_copy_path(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn shelf_open(path: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
+    crate::platform::allow_foreground();
     std::process::Command::new("explorer").raw_arg(open_arg(&path)).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -195,6 +196,7 @@ pub fn open_arg(path: &str) -> String {
 pub fn shelf_reveal(path: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     // explorer nu înțelege ghilimelele puse automat de Command; o cale cu virgulă trebuie pusă între ghilimele de noi
+    crate::platform::allow_foreground();
     std::process::Command::new("explorer").raw_arg(select_arg(&path)).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 

@@ -29,6 +29,14 @@ impl Drop for ComGuard {
     }
 }
 
+/// Înainte de o lansare sau aducere în față pornită dintr-un click: insula are `WS_EX_NOACTIVATE`, deci procesul
+/// nostru nu e în prim-plan, iar aplicația deschisă (explorer, browserul, fereastra țintă) s-ar deschide în spate.
+/// Merge pentru că procesul nostru a primit ultimul eveniment de input (click-ul).
+pub fn allow_foreground() {
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    let _ = unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+}
+
 /// HWND-ul ferestrei Tauri, convertit în tipul din crate-ul nostru `windows`.
 pub fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
     win.hwnd().ok().map(|h| HWND(h.0 as *mut core::ffi::c_void))

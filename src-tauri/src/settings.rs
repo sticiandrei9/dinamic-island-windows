@@ -247,6 +247,7 @@ pub fn open_log_dir(app: AppHandle) -> Result<(), String> {
     use tauri::Manager;
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     let _ = std::fs::create_dir_all(&dir);
+    crate::platform::allow_foreground();
     std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 

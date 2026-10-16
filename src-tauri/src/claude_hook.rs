@@ -113,7 +113,11 @@ pub fn remove_hooks(mut v: Value) -> Value {
 
 fn session_file_name(id: &str) -> Option<String> {
     let ok = !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    ok.then(|| format!("{id}.json"))
+    // nume rezervate Windows (CON, NUL, COM1…): `con.json` ar deschide dispozitivul, nu un fișier
+    let lower = id.to_ascii_lowercase();
+    let reserved = matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
+        || (lower.len() == 4 && (lower.starts_with("com") || lower.starts_with("lpt")) && matches!(lower.as_bytes()[3], b'1'..=b'9'));
+    (ok && !reserved).then(|| format!("{id}.json"))
 }
 
 pub fn sessions_dir() -> PathBuf {
@@ -218,7 +222,7 @@ pub fn run_cli(args: &[String]) -> Option<i32> {
 
 fn handle_hook() -> Option<()> {
     let mut buf = Vec::new();
-    std::io::stdin().take(64 * 1024).read_to_end(&mut buf).ok()?;
+    std::io::stdin().take(8 * 1024 * 1024).read_to_end(&mut buf).ok()?;
     // PowerShell 5.1 pune un BOM UTF-8 în față când trimite text printr-un pipe
     let body = buf.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&buf);
     let input: HookInput = serde_json::from_slice(body).ok()?;
@@ -250,8 +254,22 @@ fn find_claude() -> (u32, isize) {
         .find(|p| p.2.eq_ignore_ascii_case("claude.exe") || p.2.eq_ignore_ascii_case("node.exe"))
         .map_or(0, |p| p.0);
     let wins = visible_windows();
-    let hwnd = chain.iter().find_map(|p| wins.iter().find(|w| w.1 == p.0).map(|w| w.0)).unwrap_or(0);
-    (pid, hwnd)
+    let named: Vec<(u32, String)> = chain.iter().map(|p| (p.0, p.2.clone())).collect();
+    (pid, pick_hwnd(&named, &wins))
+}
+
+/// Prima fereastră (hwnd, pid) a unui strămoș din lanț; mersul se oprește la explorer.exe,
+/// a cărui fereastră e „Program Manager" (desktopul), nu terminalul sesiunii.
+fn pick_hwnd(chain: &[(u32, String)], wins: &[(isize, u32)]) -> isize {
+    for (pid, exe) in chain {
+        if exe.eq_ignore_ascii_case("explorer.exe") {
+            break;
+        }
+        if let Some(w) = wins.iter().find(|w| w.1 == *pid) {
+            return w.0;
+        }
+    }
+    0
 }
 
 /// (pid, ppid, nume exe) pentru toate procesele.
@@ -352,5 +370,23 @@ mod tests {
         assert!(session_file_name("..\\x").is_none());
         assert!(session_file_name("a/b").is_none());
         assert!(session_file_name("").is_none());
+        for n in ["con", "CON", "Prn", "aux", "nul", "com1", "COM9", "lpt1", "Lpt9"] {
+            assert!(session_file_name(n).is_none(), "{n}");
+        }
+        assert!(session_file_name("com10").is_some());
+        assert!(session_file_name("console").is_some());
+    }
+
+    #[test]
+    fn hwnd_ocoleste_explorer() {
+        let wins = [(111isize, 10u32), (222, 20), (333, 30)];
+        let chain = |v: &[(u32, &str)]| v.iter().map(|(p, e)| (*p, e.to_string())).collect::<Vec<_>>();
+        // fereastra primului strămoș care are una
+        assert_eq!(pick_hwnd(&chain(&[(5, "node.exe"), (20, "WindowsTerminal.exe")]), &wins), 222);
+        // conhost/cmd clasic ajunge la explorer („Program Manager"): hwnd rămâne 0
+        assert_eq!(pick_hwnd(&chain(&[(5, "cmd.exe"), (10, "Explorer.EXE")]), &wins), 0);
+        // mersul se oprește la explorer, chiar dacă un strămoș mai sus are fereastră
+        assert_eq!(pick_hwnd(&chain(&[(10, "explorer.exe"), (20, "x.exe")]), &wins), 0);
+        assert_eq!(pick_hwnd(&[], &wins), 0);
     }
 }

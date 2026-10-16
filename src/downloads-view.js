@@ -3,7 +3,7 @@ import { t } from './lib/i18n.js';
 import { formatBytes, formatRate } from './lib/format.js';
 
 // Fișierele care rulează cod cer o a doua apăsare pe „Deschide”
-const RUNS_CODE = /\.(exe|msi|bat|cmd|ps1)$/i;
+const RUNS_CODE = /\.(exe|msi|bat|cmd|ps1|scr|com|vbs|vbe|js|jse|wsf|wsh|hta|lnk|reg|msix|msixbundle|appx|appxbundle|cpl|jar)$/i;
 const SURE_MS = 3000;
 
 // Descărcările din browser (Rust emite `downloads` și `download-done`): pastilă cu inel care se rotește,

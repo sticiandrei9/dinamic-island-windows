@@ -18,7 +18,7 @@ winreg = "0.52"
 ureq = { version = "2", features = ["json"] }
 windows-core = "0.58"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 base64 = "0.22"
 png = "0.17"
 drag = "2.1.1"
@@ -46,6 +46,7 @@ features = [
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
   "Win32_System_DataExchange",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_IO",
   "Win32_System_Memory",
   "Win32_System_Ole",

@@ -2,6 +2,7 @@
 
 mod alerts;
 mod calendar;
+mod claude_hook;
 mod dev_demo;
 mod displays;
 mod hittest;
@@ -29,6 +30,10 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 fn main() {
+    // hook-ul Claude rulează înainte de orice altceva (și înainte de single-instance)
+    if let Some(code) = claude_hook::run_cli(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::open_settings(app))) // a doua pornire deschide setările
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))

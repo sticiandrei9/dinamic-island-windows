@@ -1,0 +1,356 @@
+//! Hook-ul Claude Code: instalează intrările în `~/.claude/settings.json` și,
+//! rulat cu `--claude-hook`, scrie starea sesiunii într-un fișier mic și iese
+//! înainte să pornească Tauri. Fișierele sunt citite de watcher-ul din aplicație.
+#![allow(dead_code)] // consumatorii (watcher, setări) vin în sarcinile următoare
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible,
+};
+
+const MARKER: &str = "--claude-hook";
+const EVENTS: [&str; 4] = ["UserPromptSubmit", "Notification", "Stop", "SessionEnd"];
+
+/// Forma fișierului de sesiune (`<sessions_dir>/<session_id>.json`). `at` = ms unix;
+/// `pid` / `hwnd` sunt 0 când nu au fost găsite.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SessionFile {
+    pub state: String,
+    pub cwd: String,
+    pub hwnd: isize,
+    pub pid: u32,
+    pub at: u64,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum HookStatus {
+    Installed,
+    Missing,
+    Invalid(String),
+}
+
+// ---------- logica pură ----------
+
+pub fn state_for(event: &str, notification_type: Option<&str>) -> Option<&'static str> {
+    match (event, notification_type) {
+        ("UserPromptSubmit", _) => Some("working"),
+        ("Notification", Some("permission_prompt" | "elicitation_dialog")) => Some("waiting"),
+        ("Stop", _) => Some("done"),
+        ("SessionEnd", _) => Some("end"),
+        _ => None,
+    }
+}
+
+fn is_our_hook(h: &Value) -> bool {
+    h["command"].as_str().is_some_and(|c| c.contains(MARKER))
+}
+
+fn entry_is_ours(entry: &Value) -> bool {
+    entry["hooks"].as_array().is_some_and(|a| a.iter().any(is_our_hook))
+}
+
+pub fn has_hooks(v: &Value) -> bool {
+    EVENTS.iter().all(|ev| v["hooks"][ev].as_array().is_some_and(|l| l.iter().any(entry_is_ours)))
+}
+
+/// Adaugă intrările noastre; dacă există deja (alt `exe`), doar le actualizează comanda.
+pub fn add_hooks(mut v: Value, exe: &str) -> Value {
+    let cmd = format!("\"{exe}\" {MARKER}");
+    let Some(root) = v.as_object_mut() else { return v };
+    let Some(hooks) = root.entry("hooks").or_insert_with(|| json!({})).as_object_mut() else { return v };
+    for ev in EVENTS {
+        let Some(list) = hooks.entry(ev).or_insert_with(|| json!([])).as_array_mut() else { continue };
+        let mut found = false;
+        for entry in list.iter_mut() {
+            for h in entry.get_mut("hooks").and_then(Value::as_array_mut).into_iter().flatten() {
+                if is_our_hook(h) {
+                    h["command"] = json!(cmd);
+                    found = true;
+                }
+            }
+        }
+        if !found {
+            list.push(json!({ "hooks": [{ "type": "command", "command": cmd }] }));
+        }
+    }
+    v
+}
+
+/// Scoate doar ce am adăugat noi; listele/obiectul golite de noi dispar, restul rămâne neatins.
+pub fn remove_hooks(mut v: Value) -> Value {
+    let Some(root) = v.as_object_mut() else { return v };
+    let mut changed = false;
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        for ev in EVENTS {
+            let Some(list) = hooks.get_mut(ev).and_then(Value::as_array_mut) else { continue };
+            let mut touched = false;
+            list.retain_mut(|entry| {
+                let Some(inner) = entry.get_mut("hooks").and_then(Value::as_array_mut) else { return true };
+                let n = inner.len();
+                inner.retain(|h| !is_our_hook(h));
+                touched |= n != inner.len();
+                n == inner.len() || !inner.is_empty()
+            });
+            if touched && list.is_empty() {
+                hooks.shift_remove(ev);
+            }
+            changed |= touched;
+        }
+        if changed && hooks.is_empty() {
+            root.shift_remove("hooks");
+        }
+    }
+    v
+}
+
+fn session_file_name(id: &str) -> Option<String> {
+    let ok = !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    ok.then(|| format!("{id}.json"))
+}
+
+pub fn sessions_dir() -> PathBuf {
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    base.join("ro.andrei.dynamicisland").join("claude")
+}
+
+// ---------- IO pe settings.json ----------
+
+fn settings_path() -> Result<PathBuf, String> {
+    let home = std::env::var_os("USERPROFILE").ok_or("USERPROFILE lipsește")?;
+    Ok(PathBuf::from(home).join(".claude").join("settings.json"))
+}
+
+/// Fișier lipsă sau gol → `{}`; JSON invalid sau rădăcină care nu e obiect → eroare (fișierul rămâne neatins).
+fn load(path: &Path) -> Result<Value, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
+        Err(e) => return Err(e.to_string()),
+    };
+    if text.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if v.is_object() { Ok(v) } else { Err("settings.json nu e un obiect JSON".into()) }
+}
+
+fn write_atomic(path: &Path, v: &Value) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(v).map_err(|e| e.to_string())? + "\n";
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
+pub fn install_at(path: &Path, exe: &str) -> Result<(), String> {
+    let v = load(path)?;
+    let out = add_hooks(v.clone(), exe);
+    if !has_hooks(&out) {
+        return Err("structura „hooks” din settings.json nu e un obiect de liste".into());
+    }
+    if out != v { write_atomic(path, &out) } else { Ok(()) }
+}
+
+pub fn uninstall_at(path: &Path) -> Result<(), String> {
+    let v = load(path)?;
+    let out = remove_hooks(v.clone());
+    if out != v { write_atomic(path, &out) } else { Ok(()) }
+}
+
+pub fn install(exe: &str) -> Result<(), String> {
+    install_at(&settings_path()?, exe)
+}
+
+pub fn uninstall() -> Result<(), String> {
+    uninstall_at(&settings_path()?)
+}
+
+pub fn status() -> HookStatus {
+    match settings_path().and_then(|p| load(&p)) {
+        Ok(v) if has_hooks(&v) => HookStatus::Installed,
+        Ok(_) => HookStatus::Missing,
+        Err(e) => HookStatus::Invalid(e),
+    }
+}
+
+// ---------- modul CLI ----------
+
+#[derive(Deserialize)]
+struct HookInput {
+    session_id: String,
+    hook_event_name: String,
+    #[serde(default)]
+    cwd: String,
+    #[serde(default)]
+    notification_type: Option<String>,
+}
+
+/// `Some(cod)` pentru `--claude-hook` / `--claude-unhook`, altfel `None`. Nu paniquiește și nu printează nimic.
+pub fn run_cli(args: &[String]) -> Option<i32> {
+    let has = |f: &str| args.iter().skip(1).any(|a| a == f);
+    let (hook, unhook) = (has(MARKER), has("--claude-unhook"));
+    if !hook && !unhook {
+        return None;
+    }
+    std::panic::set_hook(Box::new(|_| {})); // procesul iese oricum imediat după
+    let _ = std::panic::catch_unwind(|| {
+        if hook {
+            let _ = handle_hook();
+        } else {
+            let _ = uninstall();
+        }
+    });
+    Some(0)
+}
+
+fn handle_hook() -> Option<()> {
+    let mut buf = Vec::new();
+    std::io::stdin().take(64 * 1024).read_to_end(&mut buf).ok()?;
+    // PowerShell 5.1 pune un BOM UTF-8 în față când trimite text printr-un pipe
+    let body = buf.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&buf);
+    let input: HookInput = serde_json::from_slice(body).ok()?;
+    let state = state_for(&input.hook_event_name, input.notification_type.as_deref())?;
+    let path = sessions_dir().join(session_file_name(&input.session_id)?);
+    if state == "end" {
+        let _ = std::fs::remove_file(path);
+        return Some(());
+    }
+    let (pid, hwnd) = find_claude();
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+    let rec = SessionFile { state: state.into(), cwd: input.cwd, hwnd, pid, at };
+    write_atomic(&path, &serde_json::to_value(rec).ok()?).ok()
+}
+
+/// (pid-ul primului strămoș claude/node, hwnd-ul primei ferestre vizibile a unui strămoș); 0 când lipsesc.
+fn find_claude() -> (u32, isize) {
+    let procs = snapshot();
+    let mut chain: Vec<&(u32, u32, String)> = Vec::new();
+    let mut cur = std::process::id();
+    for _ in 0..16 {
+        let Some(me) = procs.iter().find(|p| p.0 == cur) else { break };
+        let Some(parent) = procs.iter().find(|p| p.0 == me.1) else { break };
+        chain.push(parent);
+        cur = parent.0;
+    }
+    let pid = chain
+        .iter()
+        .find(|p| p.2.eq_ignore_ascii_case("claude.exe") || p.2.eq_ignore_ascii_case("node.exe"))
+        .map_or(0, |p| p.0);
+    let wins = visible_windows();
+    let hwnd = chain.iter().find_map(|p| wins.iter().find(|w| w.1 == p.0).map(|w| w.0)).unwrap_or(0);
+    (pid, hwnd)
+}
+
+/// (pid, ppid, nume exe) pentru toate procesele.
+fn snapshot() -> Vec<(u32, u32, String)> {
+    let mut out = Vec::new();
+    unsafe {
+        let Ok(h) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
+        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut ok = Process32FirstW(h, &mut e).is_ok();
+        while ok {
+            let n = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+            out.push((e.th32ProcessID, e.th32ParentProcessID, String::from_utf16_lossy(&e.szExeFile[..n])));
+            ok = Process32NextW(h, &mut e).is_ok();
+        }
+        let _ = CloseHandle(h);
+    }
+    out
+}
+
+/// (hwnd, pid) pentru ferestrele de nivel superior vizibile și cu titlu, în ordinea Z.
+fn visible_windows() -> Vec<(isize, u32)> {
+    unsafe extern "system" fn on_window(h: HWND, lp: LPARAM) -> BOOL {
+        let out = &mut *(lp.0 as *mut Vec<(isize, u32)>);
+        if IsWindowVisible(h).as_bool() && GetWindowTextLengthW(h) > 0 {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(h, Some(&mut pid));
+            out.push((h.0 as isize, pid));
+        }
+        BOOL(1)
+    }
+    let mut out: Vec<(isize, u32)> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(on_window), LPARAM(&mut out as *mut _ as isize));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stari_din_evenimente() {
+        assert_eq!(state_for("UserPromptSubmit", None), Some("working"));
+        assert_eq!(state_for("Notification", Some("permission_prompt")), Some("waiting"));
+        assert_eq!(state_for("Notification", Some("elicitation_dialog")), Some("waiting"));
+        assert_eq!(state_for("Notification", Some("idle_prompt")), None);
+        assert_eq!(state_for("Stop", None), Some("done"));
+        assert_eq!(state_for("SessionEnd", None), Some("end"));
+        assert_eq!(state_for("PreToolUse", None), None);
+    }
+
+    #[test]
+    fn hooks_adaugate_idempotent() {
+        let v = add_hooks(json!({}), r"C:\X\dynamic-island.exe");
+        assert!(has_hooks(&v));
+        assert_eq!(add_hooks(v.clone(), r"C:\X\dynamic-island.exe"), v);
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "\"C:\\X\\dynamic-island.exe\" --claude-hook");
+    }
+
+    #[test]
+    fn hooks_pastreaza_restul() {
+        let orig = json!({ "theme": "dark", "env": { "A": "1" },
+            "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "notify.exe" }] }] } });
+        let v = add_hooks(orig.clone(), "di.exe");
+        assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
+        assert_eq!(v["theme"], "dark");
+        let back = remove_hooks(v);
+        assert_eq!(back, orig); // inclusiv ordinea cheilor (preserve_order)
+    }
+
+    #[test]
+    fn scoaterea_sterge_listele_goale() {
+        let v = remove_hooks(add_hooks(json!({ "theme": "dark" }), "di.exe"));
+        assert_eq!(v, json!({ "theme": "dark" }));
+    }
+
+    #[test]
+    fn json_invalid_neatins() {
+        let d = std::env::temp_dir().join(format!("di-hook-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("settings.json");
+        std::fs::write(&p, "{ nu e json").unwrap();
+        assert!(install_at(&p, "di.exe").is_err());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{ nu e json");
+        std::fs::remove_file(&p).unwrap();
+        install_at(&p, "di.exe").unwrap(); // lipsă → creat
+        assert!(has_hooks(&serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap()));
+        uninstall_at(&p).unwrap();
+        assert!(!has_hooks(&serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap()));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn nume_sesiune_nesigure_respinse() {
+        assert!(session_file_name("abc-123_X").is_some());
+        assert!(session_file_name("..\\x").is_none());
+        assert!(session_file_name("a/b").is_none());
+        assert!(session_file_name("").is_none());
+    }
+}

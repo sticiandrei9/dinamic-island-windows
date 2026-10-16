@@ -21,3 +21,11 @@ test('level: warn de la prag, ok pentru valori lipsă', () => {
   assert.equal(level(79, 80), 'ok');
   assert.equal(level(null, 80), 'ok');
 });
+
+test('clipPreview: spații colapsate, tăiat la 40 de caractere cu „…”', async () => {
+  const { clipPreview } = await import('../src/lib/format.js');
+  assert.equal(clipPreview('  salut\n\n  lume\t!  '), 'salut lume !');
+  assert.equal(clipPreview('a'.repeat(40)), 'a'.repeat(40));
+  assert.equal(clipPreview('a'.repeat(41)), `${'a'.repeat(40)}…`);
+  assert.equal(clipPreview('😀'.repeat(41)), `${'😀'.repeat(40)}…`); // perechile surogat nu se rup
+});

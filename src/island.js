@@ -221,7 +221,7 @@ function tickTransient() {
 
 function renderTransient(t) {
   transientEl.dataset.kind = t.kind;
-  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb' || t.kind === 'claude') {
+  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb' || t.kind === 'claude' || t.kind === 'clip') {
     transientEl.style.setProperty('--t-color', t.color ?? 'var(--fg)');
     $('t-icon').innerHTML = ICONS[t.icon] ?? ICONS.bell;
     $('t-title').textContent = t.title ?? '';
@@ -510,6 +510,14 @@ function startDemo() {
     at(7200, 'download-done-demo', { name: file, path: `C:\\Users\\Andrei\\Downloads\\${file}`, bytes: 45_000_000 });
   }
   if (p.has('system')) setTimeout(() => island.expandTo('system'), 1200); // fila Sistem cu valori inventate (system-view.js)
+  if (p.has('clipboard')) {
+    // copieri simulate (clipboard-view.js): una nouă cu tranzitorie, apoi fila deschisă
+    const items = ['Intri pe server diseară?', 'https://github.com/sticiandrei9/dinamic-island-windows', 'Un text mai lung, pe mai multe rânduri, ca să se vadă tăierea la două rânduri cu puncte de suspensie la capăt, oricât ar fi de lung. Mai adaug o propoziție, ca să nu încapă în două rânduri și să apară „…” la sfârșit.', 'npm run tauri dev', 'a'];
+    const send = (ms, detail) => setTimeout(() => window.dispatchEvent(new CustomEvent('clipboard-demo', { detail })), ms);
+    send(1000, { items: items.slice(1), new: false });
+    send(1500, { items, new: true });
+    setTimeout(() => island.expandTo('clipboard'), 4200);
+  }
   if (p.has('unlock')) setTimeout(() => island.pushTransient({ kind: 'unlock', duration: 1600, urgent: true }), 1500);
   if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);
 }

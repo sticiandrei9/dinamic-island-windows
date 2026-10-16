@@ -108,6 +108,7 @@ body.transient #transient {
 #transient[data-kind="update"] .t-alert,
 #transient[data-kind="kb"] .t-alert,
 #transient[data-kind="claude"] .t-alert,
+#transient[data-kind="clip"] .t-alert,
 #transient[data-kind="volume"] .t-volume,
 #transient[data-kind="notification"] .t-notif,
 #transient[data-kind="screenshot"] .t-shot,
@@ -355,3 +356,20 @@ body.has-lyrics .lyrics { display: block; }
 .sys-net { display: flex; justify-content: center; gap: 16px; font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; animation: sys-in .5s cubic-bezier(.2, 1.1, .4, 1) .25s both; }
 .sys-ping { color: var(--fg2); }
 @keyframes sys-in { from { opacity: 0; filter: blur(6px); transform: scale(.85); } }
+
+/* fila Clipboard */
+#transient[data-kind="clip"] .t-text b { flex: none; } /* titlul „Copiat” rămâne întreg, textul copiat se taie cu „…” */
+.cb-head { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.cb-list { display: flex; flex-direction: column; gap: 4px; }
+.cb-item { position: relative; padding: 7px 10px; border-radius: 10px; background: rgba(255, 255, 255, .07); font-size: 12.5px; line-height: 1.3; cursor: pointer; transition: background .15s, transform .2s cubic-bezier(.2, 1.4, .4, 1); }
+.cb-item.in { animation: cb-in .45s cubic-bezier(.2, 1.1, .4, 1) both; animation-delay: calc(var(--i, 0) * 50ms); }
+.cb-item:hover { background: rgba(255, 255, 255, .12); }
+.cb-item:active { transform: scale(.98); }
+.cb-text { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.cb-ok { position: absolute; inset: 0; display: none; place-items: center; font-size: 12.5px; font-weight: 600; color: var(--green); }
+.cb-item.done .cb-text { animation: cb-dim 1s ease both; }
+.cb-item.done .cb-ok { display: grid; animation: cb-flash 1s ease both; }
+.cb-empty { padding: 18px 0; text-align: center; font-size: 12.5px; color: var(--fg2); }
+@keyframes cb-in { from { opacity: 0; filter: blur(6px); transform: scale(.9); } }
+@keyframes cb-dim { 0%, 80% { opacity: .15; } 100% { opacity: 1; } }
+@keyframes cb-flash { 0% { opacity: 0; transform: scale(.8); } 15%, 75% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }

@@ -4,6 +4,7 @@ mod alerts;
 mod calendar;
 mod claude;
 mod claude_hook;
+mod clipboard;
 mod dev_demo;
 mod displays;
 mod downloads;
@@ -116,6 +117,9 @@ fn main() {
             timer::get_timer_state,
             timer::timer_command,
             system::system_watch,
+            clipboard::clipboard_list,
+            clipboard::clipboard_copy,
+            clipboard::clipboard_clear,
         ])
         .setup(|app| {
             log::info!("Dynamic Island {} pornit", app.package_info().version);
@@ -141,6 +145,7 @@ fn main() {
             downloads::spawn(app.handle().clone());
             unlock::spawn(app.handle().clone());
             system::spawn(app.handle().clone());
+            clipboard::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());

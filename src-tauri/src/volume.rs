@@ -243,23 +243,30 @@ fn suppressed(until: Option<Instant>, now: Instant) -> bool {
     until.is_some_and(|u| now < u)
 }
 
-/// Difuzorul implicit, pe thread-ul apelantului (COM MTA; dacă thread-ul e deja inițializat altfel, rămâne cum e).
-fn default_endpoint_volume() -> windows::core::Result<IAudioEndpointVolume> {
+fn ensure_mta() {
+    // dacă thread-ul e deja inițializat altfel, rămâne cum e
+    unsafe { let _ = CoInitializeEx(None, COINIT_MULTITHREADED); }
+}
+
+/// Difuzorul implicit de acum, pe thread-ul apelantului (COM MTA). Timerul de somn îl ține cât durează fade-ul,
+/// ca o schimbare a dispozitivului implicit să nu mute volumul pe alt difuzor.
+pub fn default_endpoint_volume() -> windows::core::Result<IAudioEndpointVolume> {
+    ensure_mta();
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         e.GetDefaultAudioEndpoint(eRender, eConsole)?.Activate(CLSCTX_ALL, None)
     }
 }
 
-/// Volumul master (0..1) al difuzorului implicit; None fără difuzor.
-pub fn master_volume() -> Option<f32> {
-    unsafe { default_endpoint_volume().ok()?.GetMasterVolumeLevelScalar().ok() }
+/// Volumul master (0..1) al difuzorului dat; None dacă dispozitivul nu mai răspunde.
+pub fn master_volume(ep: &IAudioEndpointVolume) -> Option<f32> {
+    ensure_mta();
+    unsafe { ep.GetMasterVolumeLevelScalar().ok() }
 }
 
-pub fn set_master_volume(v: f32) -> Result<(), String> {
-    let vol = default_endpoint_volume().map_err(|e| e.to_string())?;
-    unsafe { vol.SetMasterVolumeLevelScalar(v.clamp(0.0, 1.0), std::ptr::null()) }.map_err(|e| e.to_string())
+pub fn set_master_volume(ep: &IAudioEndpointVolume, v: f32) -> Result<(), String> {
+    ensure_mta();
+    unsafe { ep.SetMasterVolumeLevelScalar(v.clamp(0.0, 1.0), std::ptr::null()) }.map_err(|e| e.to_string())
 }
 
 /// La ieșire, OSD-ul Windows e restaurat (dacă l-am ascuns).

@@ -171,6 +171,7 @@ fn main() {
         .run(|_app, event| {
             if let tauri::RunEvent::Exit = event {
                 volume::restore_osd(); // pop-up-ul de volum al Windows revine
+                timer::restore_on_exit(); // fade de somn în curs: volumul revine
             }
         });
 }

@@ -4,6 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::PCWSTR;
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{PlaySoundW, SND_FILENAME, SND_NODEFAULT, SND_SYNC};
 
 /// Timpii sunt în milisecunde unix (JS îi compară cu `Date.now()`).
@@ -52,7 +53,8 @@ pub struct Sleep {
 /// Cât durează scăderea volumului, înainte de final.
 pub const FADE_MS: u64 = 10_000;
 /// Diferența de la care o schimbare a volumului e a utilizatorului, nu a fade-ului.
-const USER_CHANGE: f32 = 0.02;
+// sub o apăsare de tastă de volum (2%), peste cuantizarea Set→Get a dispozitivelor
+const USER_CHANGE: f32 = 0.005;
 
 /// Volumul din fade: None înainte de ultimele 10 s, apoi liniar `start → 0`.
 pub fn fade_level(now: u64, ends_at: u64, start: f32) -> Option<f32> {
@@ -233,11 +235,44 @@ fn play_alarm(times: usize) {
     });
 }
 
-/// Fade-ul în curs (doar în thread-ul timerului): somnul căruia îi aparține, volumul de dinainte și ultima valoare scrisă.
+/// Fade-ul în curs (doar în thread-ul timerului): somnul căruia îi aparține și ultima valoare CITITĂ după scriere
+/// (nu cea cerută: dispozitivul o poate cuantiza).
 struct Fade {
     ends_at: u64,
-    start: Option<f32>,
     last: Option<f32>,
+}
+
+/// Difuzorul pe care a început fade-ul și volumul de dinainte. Ținut aici ca și handler-ul de ieșire din aplicație
+/// să poată readuce volumul; același endpoint servește tot fade-ul și restaurarea (nu se mută pe alt dispozitiv).
+struct Active {
+    ep: IAudioEndpointVolume,
+    start: f32,
+}
+
+// SAFETY: IAudioEndpointVolume e liber-threaded (obiect MMDevice, MTA); toate apelurile vin de pe thread-uri MTA
+unsafe impl Send for Active {}
+
+static ACTIVE: Mutex<Option<Active>> = Mutex::new(None);
+
+/// Volumul de dinainte revine pe difuzorul fade-ului (o singură dată: starea se golește).
+fn restore_volume() {
+    if let Some(a) = ACTIVE.lock().unwrap().take() {
+        crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
+        let _ = crate::volume::set_master_volume(&a.ep, a.start);
+    }
+}
+
+/// Renunță la fade fără să scrie nimic (omul a ales volumul, pauza a eșuat sau dispozitivul a dispărut).
+fn abandon_volume() {
+    ACTIVE.lock().unwrap().take();
+}
+
+/// La ieșirea din aplicație (închidere din tray, updater) în timpul fade-ului sau al pauzei: volumul revine.
+/// Pe un thread propriu (COM MTA), ca endpoint-ul creat în MTA să nu fie apelat din thread-ul principal STA.
+pub fn restore_on_exit() {
+    if ACTIVE.lock().unwrap().is_some() {
+        let _ = std::thread::spawn(restore_volume).join();
+    }
 }
 
 /// Anulează somnul din ceas (utilizatorul a schimbat volumul sau modulul a fost oprit).
@@ -246,16 +281,14 @@ fn drop_sleep(app: &AppHandle) {
 }
 
 /// Pauza și volumul la final de somn, pe un thread separat (pauza poate dura câteva secunde).
-fn finish_sleep(app: AppHandle, start: Option<f32>) {
+fn finish_sleep(app: AppHandle) {
     std::thread::spawn(move || {
         let r = crate::media::pause_displayed(&app.state::<crate::media::LastMedia>());
         if restore_after_pause(&r) {
-            if let Some(v) = start {
-                crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
-                let _ = crate::volume::set_master_volume(v);
-            }
+            restore_volume();
             let _ = app.emit("sleep-done", ());
         } else {
+            abandon_volume(); // volumul rămâne 0, ca utilizatorul să vadă că ceva n-a mers
             log::warn!("timer de somn: pauza a eșuat: {}", r.unwrap_err());
             let _ = app.emit(
                 "alert",
@@ -275,43 +308,56 @@ fn sleep_tick(app: &AppHandle, fade: &mut Option<Fade>, now: u64) {
     let current = sleep.filter(|_| enabled);
     // somnul s-a anulat sau a fost înlocuit în timpul fade-ului: volumul lăsat jos revine
     if fade.as_ref().is_some_and(|f| current.as_ref().map(|s| s.ends_at) != Some(f.ends_at)) {
-        if let Some(v) = fade.take().and_then(|f| f.start) {
-            crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
-            let _ = crate::volume::set_master_volume(v);
-        }
+        *fade = None;
+        restore_volume();
     }
     let Some(s) = current else { return };
     if fade_level(now, s.ends_at, 1.0).is_none() {
         return; // încă înainte de ultimele 10 s
     }
     if fade.is_none() {
-        let start = crate::volume::master_volume();
-        *fade = Some(Fade { ends_at: s.ends_at, start, last: None });
+        // fără difuzor: nu e nimic de scăzut, la final doar pauza
+        let ep = crate::volume::default_endpoint_volume().ok();
+        let start = ep.as_ref().and_then(crate::volume::master_volume);
+        if let (Some(ep), Some(start)) = (ep, start) {
+            *ACTIVE.lock().unwrap() = Some(Active { ep, start });
+        }
+        *fade = Some(Fade { ends_at: s.ends_at, last: None });
         with_clock(app, |c, _| {
             if let Some(sl) = c.sleep.as_mut() {
                 sl.start_volume = start;
             }
         });
     }
-    let f = fade.as_mut().unwrap();
-    if let (Some(last), Some(actual)) = (f.last, crate::volume::master_volume()) {
-        if user_changed(last, actual) {
-            *fade = None; // a ales omul volumul: fade-ul și somnul se opresc, fără pauză
+    let active = ACTIVE.lock().unwrap().as_ref().map(|a| (a.ep.clone(), a.start));
+    if let Some((ep, start)) = active {
+        let last = fade.as_ref().and_then(|f| f.last);
+        let level = fade_level(now, s.ends_at, start).unwrap_or(0.0);
+        let stop = match crate::volume::master_volume(&ep) {
+            None => true, // dispozitivul a dispărut: nu scriem nicăieri altundeva
+            Some(actual) => last.is_some_and(|l| user_changed(l, actual)), // a ales omul volumul
+        };
+        let read_back = if stop {
+            None
+        } else {
+            crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
+            crate::volume::set_master_volume(&ep, level).ok().and_then(|_| crate::volume::master_volume(&ep))
+        };
+        let Some(read_back) = read_back else {
+            // fade-ul și somnul se opresc, fără pauză și fără restaurare
+            *fade = None;
+            abandon_volume();
             drop_sleep(app);
             return;
-        }
-    }
-    if let Some(level) = f.start.and_then(|st| fade_level(now, s.ends_at, st)) {
-        crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
-        if crate::volume::set_master_volume(level).is_ok() {
-            f.last = Some(level);
+        };
+        if let Some(f) = fade.as_mut() {
+            f.last = Some(read_back);
         }
     }
     if now >= s.ends_at {
-        let start = f.start;
         *fade = None;
         drop_sleep(app);
-        finish_sleep(app.clone(), start);
+        finish_sleep(app.clone());
     }
 }
 
@@ -474,8 +520,8 @@ mod tests {
 
     #[test]
     fn fade_oprit_de_utilizator() {
-        assert!(!user_changed(0.40, 0.41));
-        assert!(user_changed(0.40, 0.70));
+        assert!(!user_changed(0.40, 0.403)); // cuantizarea Set→Get nu e o schimbare
+        assert!(user_changed(0.40, 0.42)); // o apăsare de tastă de volum (2%) e
     }
 
     #[test]

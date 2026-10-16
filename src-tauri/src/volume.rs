@@ -1,4 +1,5 @@
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -192,7 +193,10 @@ pub fn spawn(app: AppHandle) {
             if let Some(v) = latest {
                 if volume_changed(last_volume, v) {
                     last_volume = Some(v);
-                    let _ = app.emit("volume", json!({ "source": "volume", "level": v.0, "muted": v.1 }));
+                    // fade-ul timerului de somn scrie volumul el însuși: fără tranzitorie (OSD-ul Windows se tratează la fel)
+                    if !suppressed(*SUPPRESS_UNTIL.lock().unwrap(), Instant::now()) {
+                        let _ = app.emit("volume", json!({ "source": "volume", "level": v.0, "muted": v.1 }));
+                    }
                     if osd.is_none() {
                         osd = find_osd();
                         if osd.is_none() && !osd_logged {
@@ -225,6 +229,39 @@ pub fn spawn(app: AppHandle) {
     });
 }
 
+/// Până când nu se mai trimite tranzitoria `volume` (scrierile făcute de aplicație, nu de utilizator).
+static SUPPRESS_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+pub fn suppress_transient(until: Instant) {
+    let mut g = SUPPRESS_UNTIL.lock().unwrap();
+    if g.map_or(true, |cur| until > cur) {
+        *g = Some(until);
+    }
+}
+
+fn suppressed(until: Option<Instant>, now: Instant) -> bool {
+    until.is_some_and(|u| now < u)
+}
+
+/// Difuzorul implicit, pe thread-ul apelantului (COM MTA; dacă thread-ul e deja inițializat altfel, rămâne cum e).
+fn default_endpoint_volume() -> windows::core::Result<IAudioEndpointVolume> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        e.GetDefaultAudioEndpoint(eRender, eConsole)?.Activate(CLSCTX_ALL, None)
+    }
+}
+
+/// Volumul master (0..1) al difuzorului implicit; None fără difuzor.
+pub fn master_volume() -> Option<f32> {
+    unsafe { default_endpoint_volume().ok()?.GetMasterVolumeLevelScalar().ok() }
+}
+
+pub fn set_master_volume(v: f32) -> Result<(), String> {
+    let vol = default_endpoint_volume().map_err(|e| e.to_string())?;
+    unsafe { vol.SetMasterVolumeLevelScalar(v.clamp(0.0, 1.0), std::ptr::null()) }.map_err(|e| e.to_string())
+}
+
 /// La ieșire, OSD-ul Windows e restaurat (dacă l-am ascuns).
 pub fn restore_osd() {
     if let Some(h) = find_osd() {
@@ -242,6 +279,14 @@ mod tests {
         assert!(!volume_changed(Some((0.5, false)), (0.502, false)));
         assert!(volume_changed(Some((0.5, false)), (0.52, false)));
         assert!(volume_changed(Some((0.5, false)), (0.5, true)));
+    }
+
+    #[test]
+    fn tranzitoria_suprimata_doar_pana_la_termen() {
+        let now = Instant::now();
+        assert!(!suppressed(None, now));
+        assert!(suppressed(Some(now + Duration::from_secs(1)), now));
+        assert!(!suppressed(Some(now), now));
     }
 
     #[test]

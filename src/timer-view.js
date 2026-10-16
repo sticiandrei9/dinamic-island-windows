@@ -63,7 +63,7 @@ export function init(island) {
   const laps = el('div', 'sw-laps');
 
   box.append(phase, big, presets, controls, el('div', 'tm-sep'), swBig, swRow, laps);
-  pane.append(box);
+  pane.prepend(box); // rândul „Somn” (sleep-view.js) vine după controalele timerului
 
   const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
   const setMinutes = (m) => { minutes = Math.max(1, Math.min(180, m)); render(); };
@@ -80,7 +80,7 @@ export function init(island) {
   // după un timer terminat, un click pe pastilă oprește pulsarea
   document.getElementById('compact').addEventListener('click', () => clock.finished && cmd('dismiss'));
 
-  island.registerPane('timer', { module: 'timer', icon: ICONS.timer, title: 'tab.timer', onShow: () => { if (clock.finished) cmd('dismiss'); render(); } });
+  island.registerPane('timer', { module: ['timer', 'sleep'], icon: ICONS.timer, title: 'tab.timer', onShow: () => { if (clock.finished) cmd('dismiss'); render(); } });
 
   // ---------- randare ----------
   function render() {
@@ -153,7 +153,7 @@ export function init(island) {
 
   tauri.event.listen('timer-state', (e) => apply(e.payload, true));
   invoke('get_timer_state').then((s) => apply(s, false)).catch(() => {});
-  window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.timer !== false; syncActivities(); });
+  window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.timer !== false; box.style.display = enabled ? '' : 'none'; syncActivities(); });
 
   // cât rulează ceva, actualizăm textele (și inelul bulei) de câteva ori pe secundă
   setInterval(() => {

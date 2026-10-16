@@ -1,6 +1,7 @@
 import { Spring } from './lib/spring.js';
 import { islandPath, islandRect } from './lib/shape.js';
 import { sizeScale } from './lib/util.js';
+import { paneAvailable } from './lib/tabs.js';
 import { layout, enqueue, advance, current, holdHead, drop, pauseHead } from './lib/activities.js';
 import { ICONS, speakerIcon } from './icons.js';
 import { MediaView } from './media-view.js';
@@ -28,6 +29,8 @@ const TRANSIENT = {
 };
 const EXPANDED_W = { home: 420, timer: 440, shelf: 440, mirror: 360, system: 420, clipboard: 420, notes: 400 };
 const SPRING = { response: 0.5, damping: 0.72 };
+// activitățile care deschid fila Timer (somnul are rândul lui acolo)
+const TIMER_KINDS = new Set(['timer', 'stopwatch', 'sleep']);
 
 const tauri = window.__TAURI__;
 const demo = !tauri && new URLSearchParams(location.search).has('demo');
@@ -194,9 +197,9 @@ function renderActivities() {
   compactEl.dataset.kind = pill?.kind ?? '';
   bubbleEl.dataset.kind = bubble?.kind ?? '';
   if (bubble?.kind === 'media') $('b-art').src = $('c-art').src;
-  if (bubble?.kind === 'timer' || bubble?.kind === 'stopwatch') {
+  if (bubble?.kind === 'timer' || bubble?.kind === 'stopwatch' || bubble?.kind === 'sleep') {
     const p = Math.max(0, Math.min(1, bubble.progress ?? 0));
-    bubbleEl.querySelector('.fg').style.strokeDashoffset = `${69.1 * (1 - p)}`;
+    bubbleEl.querySelector('#b-ring .fg').style.strokeDashoffset = `${69.1 * (1 - p)}`;
   }
   retarget();
 }
@@ -253,7 +256,7 @@ function renderTransient(t) {
 const TAB_ORDER = ['home', 'timer', 'system', 'clipboard', 'notes', 'shelf', 'mirror'];
 function availableTabs() {
   return [...panes.entries()]
-    .filter(([, p]) => !p.module || settings?.modules?.[p.module] !== false)
+    .filter(([, p]) => paneAvailable(p.module, settings?.modules))
     .sort(([a], [b]) => TAB_ORDER.indexOf(a) - TAB_ORDER.indexOf(b));
 }
 
@@ -293,7 +296,7 @@ function setExpanded(on, toTab) {
   if (expanded === on && !toTab) return;
   if (on) {
     const { pill } = activeLayout();
-    const wanted = toTab ?? (pill?.kind === 'timer' || pill?.kind === 'stopwatch' ? 'timer' : 'home');
+    const wanted = toTab ?? (TIMER_KINDS.has(pill?.kind) ? 'timer' : 'home');
     const target = availableTabs().some(([id]) => id === wanted) ? wanted : 'home';
     if (expanded) { setTab(target); return; }
     expanded = true;
@@ -322,7 +325,7 @@ function onHover(inside) {
 function hoverTab() {
   if (pointerX < bubbleLeft) return undefined;
   const kind = bubbleEl.dataset.kind;
-  return kind === 'timer' || kind === 'stopwatch' ? 'timer' : kind ? 'home' : undefined;
+  return TIMER_KINDS.has(kind) ? 'timer' : kind ? 'home' : undefined;
 }
 document.addEventListener('pointermove', (e) => { pointerX = e.clientX / zoom; });
 
@@ -335,7 +338,7 @@ $('stage').addEventListener('click', () => {
 bubbleEl.addEventListener('click', (e) => {
   e.stopPropagation();
   const kind = bubbleEl.dataset.kind;
-  island.expandTo(kind === 'timer' || kind === 'stopwatch' ? 'timer' : 'home');
+  island.expandTo(TIMER_KINDS.has(kind) ? 'timer' : 'home');
 });
 
 function updateClock() {
@@ -487,6 +490,8 @@ function startDemo() {
     media.update(demoInfo);
   }, 900);
   const p = new URLSearchParams(location.search);
+  if (p.get('sleep') === 'pill') setTimeout(() => media.update(null), 1100); // ?sleep=pill: somnul singur în pastilă
+  if (p.has('sleep')) setTimeout(() => window.dispatchEvent(new CustomEvent('sleep-demo', { detail: { ends_at: Date.now() + 25 * 60_000, total_ms: 30 * 60_000 } })), 1200); // timer de somn (sleep-view.js)
   if (p.has('timer')) setTimeout(() => island.setActivity('timer', { kind: 'timer', progress: 0.6 }), 1200);
   if (p.has('alert')) setTimeout(() => island.pushTransient({ kind: 'alert', icon: 'headphones', title: 'AirPods Pro', detail: 'Conectat', level: 0.8, color: 'var(--fg)', duration: 4000 }), 1500);
   if (p.has('volume')) setTimeout(() => island.pushTransient({ kind: 'volume', level: 0.62, waves: 2, duration: 3000 }), 1500);

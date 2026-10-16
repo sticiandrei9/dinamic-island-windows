@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -39,6 +39,40 @@ pub struct Pomodoro {
     pub round: u32,
 }
 
+/// Timerul de somn: la `ends_at` muzica se oprește; în ultimele 10 s volumul scade până la 0.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Sleep {
+    pub ends_at: u64,
+    /// durata aleasă (pentru inelul care se golește, în toate ferestrele)
+    pub total_ms: u64,
+    /// volumul master de dinainte de fade (reținut la intrarea în ultimele 10 s)
+    pub start_volume: Option<f32>,
+}
+
+/// Cât durează scăderea volumului, înainte de final.
+pub const FADE_MS: u64 = 10_000;
+/// Diferența de la care o schimbare a volumului e a utilizatorului, nu a fade-ului.
+const USER_CHANGE: f32 = 0.02;
+
+/// Volumul din fade: None înainte de ultimele 10 s, apoi liniar `start → 0`.
+pub fn fade_level(now: u64, ends_at: u64, start: f32) -> Option<f32> {
+    let left = ends_at.saturating_sub(now);
+    (left <= FADE_MS).then(|| start * (left as f32 / FADE_MS as f32))
+}
+
+/// Utilizatorul a mișcat volumul între două scrieri ale fade-ului.
+pub fn user_changed(expected: f32, actual: f32) -> bool {
+    (expected - actual).abs() > USER_CHANGE
+}
+
+/// După pauză volumul revine și când nu e nicio sesiune media (nimic de oprit); la altă eroare rămâne 0.
+pub fn restore_after_pause(r: &Result<(), String>) -> bool {
+    match r {
+        Ok(()) => true,
+        Err(e) => e == crate::media::NO_SESSION,
+    }
+}
+
 /// Un singur ceas pentru toată aplicația (toate insulele îl afișează la fel).
 #[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct Clock {
@@ -48,9 +82,18 @@ pub struct Clock {
     pub finished: bool,
     /// timerul face parte dintr-un ciclu Pomodoro
     pub pomodoro: Option<Pomodoro>,
+    pub sleep: Option<Sleep>,
 }
 
 impl Clock {
+    pub fn sleep_start(&mut self, total_ms: u64, now: u64) {
+        self.sleep = Some(Sleep { ends_at: now + total_ms, total_ms, start_volume: None });
+    }
+
+    pub fn sleep_cancel(&mut self) {
+        self.sleep = None;
+    }
+
     pub fn timer_start(&mut self, total_ms: u64, now: u64) {
         self.finished = false;
         self.pomodoro = None;
@@ -190,13 +233,97 @@ fn play_alarm(times: usize) {
     });
 }
 
+/// Fade-ul în curs (doar în thread-ul timerului): somnul căruia îi aparține, volumul de dinainte și ultima valoare scrisă.
+struct Fade {
+    ends_at: u64,
+    start: Option<f32>,
+    last: Option<f32>,
+}
+
+/// Anulează somnul din ceas (utilizatorul a schimbat volumul sau modulul a fost oprit).
+fn drop_sleep(app: &AppHandle) {
+    with_clock(app, |c, _| c.sleep_cancel());
+}
+
+/// Pauza și volumul la final de somn, pe un thread separat (pauza poate dura câteva secunde).
+fn finish_sleep(app: AppHandle, start: Option<f32>) {
+    std::thread::spawn(move || {
+        let r = crate::media::pause_displayed(&app.state::<crate::media::LastMedia>());
+        if restore_after_pause(&r) {
+            if let Some(v) = start {
+                crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
+                let _ = crate::volume::set_master_volume(v);
+            }
+            let _ = app.emit("sleep-done", ());
+        } else {
+            log::warn!("timer de somn: pauza a eșuat: {}", r.unwrap_err());
+            let _ = app.emit(
+                "alert",
+                serde_json::json!({ "icon": "bell", "title": crate::i18n::t("sleep.pauseFailed"), "detail": "", "color": "var(--red)", "level": null }),
+            );
+        }
+    });
+}
+
+/// Un pas al somnului (la 250 ms): în ultimele 10 s scade volumul; la final oprește muzica.
+fn sleep_tick(app: &AppHandle, fade: &mut Option<Fade>, now: u64) {
+    let enabled = app.state::<crate::settings::SettingsState>().get().modules.sleep;
+    let sleep = app.state::<ClockState>().0.lock().unwrap().sleep.clone();
+    if sleep.is_some() && !enabled {
+        drop_sleep(app); // modulul oprit din Setări: somnul dispare
+    }
+    let current = sleep.filter(|_| enabled);
+    // somnul s-a anulat sau a fost înlocuit în timpul fade-ului: volumul lăsat jos revine
+    if fade.as_ref().is_some_and(|f| current.as_ref().map(|s| s.ends_at) != Some(f.ends_at)) {
+        if let Some(v) = fade.take().and_then(|f| f.start) {
+            crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
+            let _ = crate::volume::set_master_volume(v);
+        }
+    }
+    let Some(s) = current else { return };
+    if fade_level(now, s.ends_at, 1.0).is_none() {
+        return; // încă înainte de ultimele 10 s
+    }
+    if fade.is_none() {
+        let start = crate::volume::master_volume();
+        *fade = Some(Fade { ends_at: s.ends_at, start, last: None });
+        with_clock(app, |c, _| {
+            if let Some(sl) = c.sleep.as_mut() {
+                sl.start_volume = start;
+            }
+        });
+    }
+    let f = fade.as_mut().unwrap();
+    if let (Some(last), Some(actual)) = (f.last, crate::volume::master_volume()) {
+        if user_changed(last, actual) {
+            *fade = None; // a ales omul volumul: fade-ul și somnul se opresc, fără pauză
+            drop_sleep(app);
+            return;
+        }
+    }
+    if let Some(level) = f.start.and_then(|st| fade_level(now, s.ends_at, st)) {
+        crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
+        if crate::volume::set_master_volume(level).is_ok() {
+            f.last = Some(level);
+        }
+    }
+    if now >= s.ends_at {
+        let start = f.start;
+        *fade = None;
+        drop_sleep(app);
+        finish_sleep(app.clone(), start);
+    }
+}
+
 /// Verifică de 4 ori pe secundă dacă timerul s-a terminat; după 30 s, pulsarea se oprește singură.
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut finished_at: Option<u64> = None;
+        let mut fade: Option<Fade> = None;
         loop {
             std::thread::sleep(Duration::from_millis(250));
             let now = now_ms();
+            sleep_tick(&app, &mut fade, now);
             let (done, clear, pomodoro) = {
                 let state = app.state::<ClockState>();
                 let mut c = state.0.lock().unwrap();
@@ -238,6 +365,8 @@ pub fn timer_command(app: AppHandle, action: String, seconds: Option<u64>) -> Re
         "resume" => with_clock(&app, |c, now| c.timer_resume(now)),
         "cancel" => with_clock(&app, |c, _| c.timer_cancel()),
         "dismiss" => with_clock(&app, |c, _| c.dismiss()),
+        "sleep_start" => with_clock(&app, |c, now| c.sleep_start(seconds.unwrap_or(1800).clamp(1, 3 * 3600) * 1000, now)),
+        "sleep_cancel" => with_clock(&app, |c, _| c.sleep_cancel()),
         "sw_start" => with_clock(&app, |c, now| c.stopwatch_start(now)),
         "sw_pause" => with_clock(&app, |c, now| c.stopwatch_pause(now)),
         "sw_lap" => with_clock(&app, |c, now| c.stopwatch_lap(now)),
@@ -333,6 +462,36 @@ mod tests {
         assert_eq!(s.stopwatch.as_ref().unwrap().laps, vec![3_000, 4_000, 5_000, 6_000, 7_000]);
         // numerotarea continuă: cele 5 afișate sunt turele 3–7
         assert_eq!(s.stopwatch.as_ref().unwrap().lap_total, 7);
+    }
+
+    #[test]
+    fn fade_in_ultimele_10s() {
+        assert_eq!(fade_level(0, 20_000, 0.8), None);
+        assert_eq!(fade_level(10_000, 20_000, 0.8), Some(0.8));
+        assert!((fade_level(15_000, 20_000, 0.8).unwrap() - 0.4).abs() < 1e-6);
+        assert_eq!(fade_level(25_000, 20_000, 0.8), Some(0.0));
+    }
+
+    #[test]
+    fn fade_oprit_de_utilizator() {
+        assert!(!user_changed(0.40, 0.41));
+        assert!(user_changed(0.40, 0.70));
+    }
+
+    #[test]
+    fn somn_porneste_si_se_anuleaza() {
+        let mut c = Clock::default();
+        c.sleep_start(1_800_000, 0);
+        assert_eq!(c.sleep.as_ref().unwrap().ends_at, 1_800_000);
+        c.sleep_cancel();
+        assert!(c.sleep.is_none());
+    }
+
+    #[test]
+    fn fara_media_volum_restaurat() {
+        assert!(restore_after_pause(&Ok(())));
+        assert!(restore_after_pause(&Err("nicio sesiune media".into())));
+        assert!(!restore_after_pause(&Err("timeout".into())));
     }
 
     #[test]

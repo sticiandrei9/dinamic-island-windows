@@ -24,3 +24,9 @@ export function elapsedMs(stopwatch, now) {
   if (!stopwatch) return 0;
   return stopwatch.base_ms + (stopwatch.started_at != null ? Math.max(0, now - stopwatch.started_at) : 0);
 }
+
+// Cât a rămas din somn, de la 1 (la start) la 0 (inelul se golește).
+export function sleepProgress(sleep, now) {
+  if (!sleep || !sleep.total_ms) return 0;
+  return Math.max(0, Math.min(1, (sleep.ends_at - now) / sleep.total_ms));
+}

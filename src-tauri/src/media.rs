@@ -153,6 +153,8 @@ pub(crate) fn await_op_for<T: RuntimeType + 'static>(op: IAsyncOperation<T>, tim
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum MediaAction {
     PlayPause,
+    /// pauză sigură (nu comută): o folosește timerul de somn
+    Pause,
     Next,
     Prev,
 }
@@ -161,6 +163,7 @@ impl MediaAction {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "play_pause" => Some(Self::PlayPause),
+            "pause" => Some(Self::Pause),
             "next" => Some(Self::Next),
             "prev" => Some(Self::Prev),
             _ => None,
@@ -498,20 +501,34 @@ pub async fn media_control(action: String, state: tauri::State<'_, LastMedia>) -
     let action = MediaAction::parse(&action).ok_or_else(|| format!("acțiune necunoscută: {action}"))?;
     let store = state.inner().clone();
     let displayed = store.get().map(|m| m.aumid);
-    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let m = request_manager().map_err(|e| e.to_string())?;
-        let s = command_session(&m, displayed.as_deref()).ok_or("nicio sesiune media")?;
-        let op = match action {
-            MediaAction::PlayPause => s.TryTogglePlayPauseAsync(),
-            MediaAction::Next => s.TrySkipNextAsync(),
-            MediaAction::Prev => s.TrySkipPreviousAsync(),
-        };
-        control_outcome(op.and_then(await_op))
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || run_action(action, displayed.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?;
     store.request_resync();
     result
+}
+
+/// Mesajul când nu există nicio sesiune media (timerul de somn îl tratează ca „nimic de oprit”).
+pub const NO_SESSION: &str = "nicio sesiune media";
+
+fn run_action(action: MediaAction, displayed: Option<&str>) -> Result<(), String> {
+    let m = request_manager().map_err(|e| e.to_string())?;
+    let s = command_session(&m, displayed).ok_or(NO_SESSION)?;
+    let op = match action {
+        MediaAction::PlayPause => s.TryTogglePlayPauseAsync(),
+        MediaAction::Pause => s.TryPauseAsync(),
+        MediaAction::Next => s.TrySkipNextAsync(),
+        MediaAction::Prev => s.TrySkipPreviousAsync(),
+    };
+    control_outcome(op.and_then(await_op))
+}
+
+/// Pune pe pauză (TryPauseAsync) sesiunea afișată în insulă; blochează thread-ul curent (cel mult câteva secunde),
+/// deci se apelează din thread-ul timerului, nu din cel UI.
+pub fn pause_displayed(store: &LastMedia) -> Result<(), String> {
+    let r = run_action(MediaAction::Pause, store.get().map(|m| m.aumid).as_deref());
+    store.request_resync();
+    r
 }
 
 #[cfg(test)]
@@ -677,6 +694,7 @@ mod tests {
     #[test]
     fn actiuni_media() {
         assert_eq!(MediaAction::parse("play_pause"), Some(MediaAction::PlayPause));
+        assert_eq!(MediaAction::parse("pause"), Some(MediaAction::Pause));
         assert_eq!(MediaAction::parse("next"), Some(MediaAction::Next));
         assert_eq!(MediaAction::parse("prev"), Some(MediaAction::Prev));
         assert_eq!(MediaAction::parse("volum"), None);

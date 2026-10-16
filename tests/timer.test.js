@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatClock, formatStopwatch, remainingMs, elapsedMs } from '../src/lib/timer.js';
+import { formatClock, formatStopwatch, remainingMs, elapsedMs, sleepProgress } from '../src/lib/timer.js';
 
 test('formatClock rotunjește în sus, ca timpul rămas să nu arate 0:00 înainte de final', () => {
   assert.equal(formatClock(299_001), '5:00');
@@ -20,4 +20,14 @@ test('timpul rămas și scurs din starea Rust', () => {
   assert.equal(remainingMs(null, 0), 0);
   assert.equal(elapsedMs({ base_ms: 1_000, started_at: 5_000, laps: [] }, 7_000), 3_000);
   assert.equal(elapsedMs({ base_ms: 1_000, started_at: null, laps: [] }, 7_000), 1_000);
+});
+
+test('progresul somnului se golește de la 1 la 0 și rămâne în [0, 1]', () => {
+  const s = { ends_at: 100_000, total_ms: 40_000 };
+  assert.equal(sleepProgress(s, 60_000), 1);
+  assert.equal(sleepProgress(s, 80_000), 0.5);
+  assert.equal(sleepProgress(s, 100_000), 0);
+  assert.equal(sleepProgress(s, 150_000), 0);
+  assert.equal(sleepProgress(s, 0), 1);
+  assert.equal(sleepProgress(null, 0), 0);
 });

@@ -6,6 +6,7 @@
   --orange: #ff9f0a;
   --green: #30d158;
   --red: #ff453a;
+  --indigo: #7d7aff;
   --font: -apple-system, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,7 +44,8 @@ img { -webkit-user-drag: none; user-select: none; }
 #compact[data-kind="meeting"] .c-meet,
 #compact[data-kind="claude"] .c-claude,
 #compact[data-kind="claude-waiting"] .c-claude,
-#compact[data-kind="download"] .c-download { display: flex; }
+#compact[data-kind="download"] .c-download,
+#compact[data-kind="sleep"] .c-sleep { display: flex; }
 #compact .art { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; }
 #compact[data-kind=""] .dots { margin-left: auto; }
 body.expanded #compact, body.transient #compact { opacity: 0; filter: blur(6px); pointer-events: none; }
@@ -80,7 +82,7 @@ body.mic-on .dot.mic, body.cam-on .dot.cam { display: block; animation: dot-in .
 }
 #bubble > * { display: none; }
 #bubble[data-kind="media"] #b-art { display: block; width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
-#bubble[data-kind="timer"] #b-ring, #bubble[data-kind="stopwatch"] #b-ring { display: block; width: 26px; height: 26px; transform: rotate(-90deg); }
+#bubble[data-kind="timer"] #b-ring, #bubble[data-kind="stopwatch"] #b-ring, #bubble[data-kind="sleep"] #b-ring { display: block; width: 26px; height: 26px; transform: rotate(-90deg); }
 /* Claude Code în bulă: aceeași steluță, portocalie când te așteaptă */
 #b-claude { width: 20px; height: 20px; color: var(--fg); }
 #b-claude svg { width: 18px; height: 18px; }
@@ -92,6 +94,13 @@ body.mic-on .dot.mic, body.cam-on .dot.cam { display: block; animation: dot-in .
 #b-ring .fg { stroke: var(--orange); stroke-linecap: round; stroke-dasharray: 69.1; transition: stroke-dashoffset .5s linear; }
 #bubble[data-kind="stopwatch"] #b-ring .bg { stroke: rgba(48, 209, 88, .25); }
 #bubble[data-kind="stopwatch"] #b-ring .fg { stroke: var(--green); }
+/* somn: luna în mijlocul inelului care se golește */
+#bubble[data-kind="sleep"] #b-ring { grid-area: 1 / 1; }
+#bubble[data-kind="sleep"] #b-ring .bg { stroke: rgba(125, 122, 255, .25); }
+#bubble[data-kind="sleep"] #b-ring .fg { stroke: var(--indigo); }
+#b-moon { width: 14px; height: 14px; color: var(--indigo); }
+#b-moon svg { width: 14px; height: 14px; }
+#bubble[data-kind="sleep"] #b-moon { display: block; grid-area: 1 / 1; animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
 body.expanded #bubble, body.transient #bubble, #bubble[data-kind=""] { opacity: 0; filter: blur(4px); pointer-events: none; }
 
 /* ---------- activități tranzitorii ---------- */
@@ -373,3 +382,19 @@ body.has-lyrics .lyrics { display: block; }
 @keyframes cb-in { from { opacity: 0; filter: blur(6px); transform: scale(.9); } }
 @keyframes cb-dim { 0%, 80% { opacity: .15; } 100% { opacity: 1; } }
 @keyframes cb-flash { 0% { opacity: 0; transform: scale(.8); } 15%, 75% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+
+/* ---------- timer de somn ---------- */
+#compact .c-sleep { gap: 8px; justify-content: flex-start; color: var(--indigo); animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
+#compact .c-sleep .c-time { flex: 1; }
+.s-ring { width: 18px; height: 18px; flex: none; transform: rotate(-90deg); }
+.s-ring circle { fill: none; stroke-width: 3; }
+.s-ring .bg { stroke: rgba(125, 122, 255, .25); }
+.s-ring .fg { stroke: var(--indigo); stroke-linecap: round; stroke-dasharray: 56.5; transition: stroke-dashoffset .5s linear; }
+.sl-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .08); animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
+.sl-row.alone { margin-top: 0; padding-top: 0; border-top: 0; }
+.sl-row[hidden] { display: none; }
+.sl-label { display: flex; align-items: center; gap: 5px; margin-right: 4px; font-size: 12px; font-weight: 600; color: var(--indigo); }
+.sl-label svg { width: 15px; height: 15px; }
+.sl-left { min-width: 56px; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--indigo); text-align: center; }
+.sl-row .pill-btn { white-space: nowrap; }
+.sl-row .pill-btn.indigo { background: rgba(125, 122, 255, .22); color: var(--indigo); }

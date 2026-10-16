@@ -7,6 +7,7 @@ export const ICONS = {
   timer: svg('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/>'),
   shelf: svg('<path d="M4 7h16v12H4zM4 7l2-3h12l2 3M9.5 11.5h5"/>'),
   mirror: svg('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10.5 5-3v9l-5-3"/>'),
+  system: svg('<rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>'),
   hourglass: svg('<path d="M6.5 3h11M6.5 21h11M7.5 3c0 5 4.5 6 4.5 9s-4.5 4-4.5 9M16.5 3c0 5-4.5 6-4.5 9s4.5 4 4.5 9"/>'),
   stopwatch: svg('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4M10 2.5h4M18.5 6l1.5-1.5"/>'),
   bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 2 4.5 13.5H11L10 22l9-11.5h-6.5z"/></svg>',

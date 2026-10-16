@@ -10,3 +10,6 @@ export function formatBytes(n) {
 }
 
 export const formatRate = (bytesPerSec) => `${formatBytes(bytesPerSec)}/s`;
+
+// „warn” de la prag în sus; o valoare lipsă (senzor indisponibil) nu avertizează
+export const level = (value, warnAt) => (value != null && value >= warnAt ? 'warn' : 'ok');

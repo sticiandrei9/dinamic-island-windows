@@ -509,6 +509,7 @@ function startDemo() {
     at(7200, 'downloads-demo', []);
     at(7200, 'download-done-demo', { name: file, path: `C:\\Users\\Andrei\\Downloads\\${file}`, bytes: 45_000_000 });
   }
+  if (p.has('system')) setTimeout(() => island.expandTo('system'), 1200); // fila Sistem cu valori inventate (system-view.js)
   if (p.has('unlock')) setTimeout(() => island.pushTransient({ kind: 'unlock', duration: 1600, urgent: true }), 1500);
   if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);
 }

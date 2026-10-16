@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setLang } from '../src/lib/i18n.js';
-import { formatBytes, formatRate } from '../src/lib/format.js';
+import { formatBytes, formatRate, level } from '../src/lib/format.js';
 
 test('mărimi și viteze: unități zecimale, virgulă în ro, punct în en', () => {
   setLang('ro');
@@ -13,4 +13,11 @@ test('mărimi și viteze: unități zecimale, virgulă în ro, punct în en', ()
   setLang('en');
   assert.equal(formatRate(4_200_000), '4.2 MB/s');
   setLang('ro');
+});
+
+test('level: warn de la prag, ok pentru valori lipsă', () => {
+  assert.equal(level(81, 80), 'warn');
+  assert.equal(level(80, 80), 'warn');
+  assert.equal(level(79, 80), 'ok');
+  assert.equal(level(null, 80), 'ok');
 });

@@ -21,6 +21,7 @@ mod privacy;
 mod screenshot;
 mod settings;
 mod shelf;
+mod system;
 mod timer;
 mod tray;
 mod unlock;
@@ -114,6 +115,7 @@ fn main() {
             updater::apply_update,
             timer::get_timer_state,
             timer::timer_command,
+            system::system_watch,
         ])
         .setup(|app| {
             log::info!("Dynamic Island {} pornit", app.package_info().version);
@@ -138,6 +140,7 @@ fn main() {
             claude::spawn(app.handle().clone());
             downloads::spawn(app.handle().clone());
             unlock::spawn(app.handle().clone());
+            system::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());

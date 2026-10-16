@@ -42,7 +42,8 @@ img { -webkit-user-drag: none; user-select: none; }
 #compact[data-kind="call"] .c-call,
 #compact[data-kind="meeting"] .c-meet,
 #compact[data-kind="claude"] .c-claude,
-#compact[data-kind="claude-waiting"] .c-claude { display: flex; }
+#compact[data-kind="claude-waiting"] .c-claude,
+#compact[data-kind="download"] .c-download { display: flex; }
 #compact .art { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; }
 #compact[data-kind=""] .dots { margin-left: auto; }
 body.expanded #compact, body.transient #compact { opacity: 0; filter: blur(6px); pointer-events: none; }
@@ -109,8 +110,9 @@ body.transient #transient {
 #transient[data-kind="claude"] .t-alert,
 #transient[data-kind="volume"] .t-volume,
 #transient[data-kind="notification"] .t-notif,
-#transient[data-kind="screenshot"] .t-shot { display: flex; }
-body.transient #transient[data-kind="screenshot"], body.transient #transient[data-kind="claude"] { pointer-events: auto; }
+#transient[data-kind="screenshot"] .t-shot,
+#transient[data-kind="download"] .t-download { display: flex; }
+body.transient #transient[data-kind="screenshot"], body.transient #transient[data-kind="claude"], body.transient #transient[data-kind="download"] { pointer-events: auto; }
 body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .t-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--t-color, var(--fg)); }
 .t-icon svg { width: 21px; height: 21px; }
@@ -140,6 +142,20 @@ body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .t-shot { gap: 10px; padding: 0 12px 0 10px; }
 #s-thumb { height: 60px; max-width: 108px; border-radius: 10px; object-fit: cover; flex: none; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .2); }
 .t-shot .pill-btn { flex: none; padding: 5px 10px; }
+/* descărcări: inel care se rotește (fără procent), la final fișierul cu Deschide / Arată în folder */
+#compact .c-download { gap: 8px; justify-content: flex-start; animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
+.d-ring { width: 18px; height: 18px; flex: none; animation: d-spin 1s linear infinite; }
+.d-ring circle { fill: none; stroke-width: 3; }
+.d-ring .bg { stroke: rgba(255, 255, 255, .18); }
+.d-ring .fg { stroke: var(--green); stroke-linecap: round; stroke-dasharray: 14 43; }
+@keyframes d-spin { to { transform: rotate(360deg); } }
+#bubble[data-kind="download"] #b-download { display: block; width: 22px; height: 22px; }
+.c-download b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.c-download span { flex: none; margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--fg2); white-space: nowrap; }
+.t-download { gap: 10px; padding: 0 12px 0 14px; animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
+.d-file { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: rgba(255, 255, 255, .1); color: var(--green); cursor: grab; touch-action: none; }
+.d-file svg { width: 20px; height: 20px; pointer-events: none; }
+.t-download .pill-btn { flex: none; padding: 5px 10px; }
 .s-close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: var(--fg2); font-size: 14px; line-height: 22px; cursor: pointer; }
 
 /* ---------- extins ---------- */

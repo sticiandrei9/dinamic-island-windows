@@ -30,6 +30,11 @@
         <span class="c-icon" id="c-claude-icon"></span>
         <span class="c-claude-text" id="c-claude-text"></span>
       </div>
+      <div class="c-slot c-download">
+        <svg class="d-ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="bg" cx="12" cy="12" r="9" /><circle class="fg" cx="12" cy="12" r="9" /></svg>
+        <b id="c-download-name"></b>
+        <span id="c-download-info"></span>
+      </div>
       <div class="c-slot c-call">
         <button class="c-mic" id="c-mic"></button>
         <span class="c-call-text" id="c-call-text"></span>
@@ -41,6 +46,7 @@
     <div id="bubble" data-kind="">
       <img id="b-art" alt="" />
       <span id="b-claude"></span>
+      <svg id="b-download" class="d-ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="bg" cx="12" cy="12" r="9" /><circle class="fg" cx="12" cy="12" r="9" /></svg>
       <svg id="b-ring" viewBox="0 0 32 32"><circle class="bg" cx="16" cy="16" r="11" /><circle class="fg" cx="16" cy="16" r="11" /></svg>
     </div>
 
@@ -62,6 +68,13 @@
         <button class="pill-btn" id="s-save" data-i18n="shot.save"></button>
         <button class="pill-btn green" id="s-shelf" data-i18n="shot.shelf"></button>
         <button class="s-close" id="s-close" aria-label="×">×</button>
+      </div>
+      <div class="t-row t-download">
+        <span class="d-file" id="d-file"></span>
+        <div class="t-text"><b id="d-name"></b><span id="d-size"></span></div>
+        <button class="pill-btn" id="d-open" data-i18n="download.open"></button>
+        <button class="pill-btn green" id="d-reveal" data-i18n="download.reveal"></button>
+        <button class="s-close" id="d-close" aria-label="×">×</button>
       </div>
       <div class="t-row t-notif">
         <img id="n-icon" alt="" />

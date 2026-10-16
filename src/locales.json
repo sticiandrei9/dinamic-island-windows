@@ -210,6 +210,15 @@
     "claude.state.working": "lucrează",
     "claude.state.waiting": "te așteaptă",
     "claude.min": "{n} min",
+    "download.count": {
+      "one": "{n} descărcare",
+      "few": "{n} descărcări",
+      "other": "{n} de descărcări"
+    },
+    "download.unnamed": "Descărcare",
+    "download.open": "Deschide",
+    "download.sure": "Sigur?",
+    "download.reveal": "Arată în folder",
     "settings.claudeInstalled": "Hook-ul Claude e instalat.",
     "settings.claudeMissing": "Hook-ul Claude lipsește.",
     "settings.claudeInstall": "Instalează",
@@ -421,6 +430,14 @@
     "claude.state.working": "working",
     "claude.state.waiting": "waiting for you",
     "claude.min": "{n} min",
+    "download.count": {
+      "one": "{n} download",
+      "other": "{n} downloads"
+    },
+    "download.unnamed": "Download",
+    "download.open": "Open",
+    "download.sure": "Sure?",
+    "download.reveal": "Show in folder",
     "settings.claudeInstalled": "Claude hook installed.",
     "settings.claudeMissing": "Claude hook is missing.",
     "settings.claudeInstall": "Install",
@@ -644,6 +661,16 @@
     "claude.state.working": "работает",
     "claude.state.waiting": "ждёт вас",
     "claude.min": "{n} мин",
+    "download.count": {
+      "one": "{n} загрузка",
+      "few": "{n} загрузки",
+      "many": "{n} загрузок",
+      "other": "{n} загрузки"
+    },
+    "download.unnamed": "Загрузка",
+    "download.open": "Открыть",
+    "download.sure": "Уверены?",
+    "download.reveal": "Показать в папке",
     "settings.claudeInstalled": "Хук Claude установлен.",
     "settings.claudeMissing": "Хук Claude отсутствует.",
     "settings.claudeInstall": "Установить",

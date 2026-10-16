@@ -20,6 +20,7 @@ export const ICONS = {
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>'),
   bell: svg('<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
   download: svg('<circle cx="12" cy="12" r="9.5"/><path d="M12 7.5v8M8.5 12.5 12 16l3.5-3.5"/>'),
+  file: svg('<path d="M6.5 3h7l4.5 4.5V20a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M13.5 3v4.5H18"/>'),
   micOff: svg('<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4M3.5 3.5l17 17"/>'),
   mic: svg('<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4"/>'),
   capslock: svg('<path d="M12 4 4.5 12H9v4.5h6V12h4.5z"/><path d="M9 20h6"/>'),

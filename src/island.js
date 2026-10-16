@@ -237,6 +237,8 @@ function renderTransient(t) {
   } else if (t.kind === 'screenshot') {
     $('s-thumb').src = t.thumb;
     $('s-size').textContent = `${t.width} × ${t.height}`;
+  } else if (t.kind === 'download') {
+    window.dispatchEvent(new CustomEvent('download-show', { detail: t })); // rândul îl umple downloads-view
   } else if (t.kind === 'notification') {
     $('n-icon').src = t.icon ?? '';
     $('n-app').textContent = t.app ?? '';
@@ -496,6 +498,14 @@ function startDemo() {
     send(18000, [sess('a', 'insula', 'done')]);
     send(19000, []);
     send(22000, [sess('a', 'insula', 'working'), sess('b', 'api', 'working')]);
+  }
+  if (p.has('download')) {
+    // o descărcare care crește 6 s, apoi tranzitoria; ?download=exe cere „Sigur?” la Deschide
+    const file = p.get('download') === 'exe' ? 'setup-v2.exe' : 'film-de-vacanta.mp4';
+    const at = (ms, ev, detail) => setTimeout(() => window.dispatchEvent(new CustomEvent(ev, { detail })), ms);
+    for (let s = 0; s < 6; s++) at(1200 + s * 1000, 'downloads-demo', [{ id: file, name: file, bytes: 20_000_000 + s * 4_200_000, speed: 4_200_000 }]);
+    at(7200, 'downloads-demo', []);
+    at(7200, 'download-done-demo', { name: file, path: `C:\\Users\\Andrei\\Downloads\\${file}`, bytes: 45_000_000 });
   }
   if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);
 }

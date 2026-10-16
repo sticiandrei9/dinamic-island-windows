@@ -90,28 +90,33 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 /// Notificare la orice schimbare în folder; fără ea (eroare) thread-ul doar reverifică la 2 s.
-struct Watch(HANDLE);
+pub(crate) struct Watch(HANDLE);
 
 impl Watch {
-    fn new(dir: &Path) -> Option<Self> {
+    pub(crate) fn new(dir: &Path) -> Option<Self> {
         let path = HSTRING::from(dir.to_string_lossy().as_ref());
         unsafe { FindFirstChangeNotificationW(&path, false, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE) }.ok().map(Watch)
     }
 
     /// Așteaptă o schimbare sau cel mult `ms`. După o schimbare mai așteaptă 100 ms (tmp + rename vin la rând),
     /// apoi rearmează, înainte de scanare, ca nicio schimbare să nu se piardă.
-    /// `false` = mânerul nu mai merge (eroare): apelantul îl recreează, ca bucla să nu se rotească în gol.
-    fn wait(&self, ms: u32) -> bool {
+    /// `None` = mânerul nu mai merge (eroare): apelantul îl recreează, ca bucla să nu se rotească în gol.
+    /// `Some(true)` = s-a schimbat ceva, `Some(false)` = a expirat timpul.
+    pub(crate) fn poll(&self, ms: u32) -> Option<bool> {
         unsafe {
             match WaitForSingleObject(self.0, ms) {
                 WAIT_OBJECT_0 => {
                     std::thread::sleep(Duration::from_millis(100));
-                    FindNextChangeNotification(self.0).is_ok()
+                    FindNextChangeNotification(self.0).is_ok().then_some(true)
                 }
-                WAIT_TIMEOUT => true,
-                _ => false,
+                WAIT_TIMEOUT => Some(false),
+                _ => None,
             }
         }
+    }
+
+    fn wait(&self, ms: u32) -> bool {
+        self.poll(ms).is_some()
     }
 }
 

@@ -6,6 +6,7 @@ mod claude;
 mod claude_hook;
 mod dev_demo;
 mod displays;
+mod downloads;
 mod hittest;
 mod hotkey;
 mod i18n;
@@ -134,6 +135,7 @@ fn main() {
             displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());
             claude::spawn(app.handle().clone());
+            downloads::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());

@@ -56,6 +56,22 @@ pub fn rates(prev: &[(u64, u64, u64)], now: &[(u64, u64, u64)], dt_s: f64) -> (f
     (down as f64 / dt_s, up as f64 / dt_s)
 }
 
+/// Interfață fizică activă: Ethernet/Wi-Fi, în funcțiune, cu bitul `HardwareInterface` (0b1) și fără `FilterInterface` (0b10).
+/// Adaptoarele virtuale (Hyper-V/WSL, VMware, TAP, Docker) nu au bitul hardware și ar număra traficul de două ori.
+pub fn is_physical_up(kind: u32, up: bool, flags: u8) -> bool {
+    (kind == IF_TYPE_ETHERNET_CSMACD || kind == IF_TYPE_IEEE80211) && up && flags & 0b01 != 0 && flags & 0b10 == 0
+}
+
+/// A trecut cel puțin `every` de la `last` (sau n-a fost niciodată)?
+fn due(last: Option<Instant>, now: Instant, every: Duration) -> bool {
+    last.map_or(true, |t| now.saturating_duration_since(t) >= every)
+}
+
+/// Valoarea păstrată doar cât e mai nouă de `keep`.
+fn fresh<T: Copy>(last: Option<(T, Instant)>, now: Instant, keep: Duration) -> Option<T> {
+    last.filter(|(_, at)| now.saturating_duration_since(*at) < keep).map(|(v, _)| v)
+}
+
 /// LUID-ul din numele unei instanțe PDH (`pid_X_luid_0x..._0x..._phys_N_eng_M_engtype_3D`).
 fn luid_of(name: &str) -> Option<&str> {
     name.split_once("luid_")?.1.split_once("_phys")?.0.into()
@@ -95,7 +111,7 @@ fn memory() -> (u64, u64) {
     (m.ullTotalPhys.saturating_sub(m.ullAvailPhys), m.ullTotalPhys)
 }
 
-/// (index, octeți primiți, octeți trimiși) pentru interfețele Ethernet/Wi-Fi active, fără cele de filtrare (ar număra de două ori).
+/// (index, octeți primiți, octeți trimiși) pentru interfețele fizice active (vezi `is_physical_up`).
 fn interfaces() -> Vec<(u64, u64, u64)> {
     let mut out = Vec::new();
     unsafe {
@@ -105,9 +121,7 @@ fn interfaces() -> Vec<(u64, u64, u64)> {
         }
         let rows = std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
         for r in rows {
-            let physical = r.Type == IF_TYPE_ETHERNET_CSMACD || r.Type == IF_TYPE_IEEE80211;
-            let filter = r.InterfaceAndOperStatusFlags._bitfield & 0b10 != 0; // FilterInterface
-            if physical && r.OperStatus == IfOperStatusUp && !filter {
+            if is_physical_up(r.Type, r.OperStatus == IfOperStatusUp, r.InterfaceAndOperStatusFlags._bitfield) {
                 out.push((u64::from(r.InterfaceIndex), r.InOctets, r.OutOctets));
             }
         }
@@ -138,27 +152,30 @@ impl Gpu {
         }
     }
 
-    /// (nume instanță, utilizare %) pentru toate instanțele.
-    fn read(&self) -> Vec<(String, f64)> {
-        unsafe {
+    /// (nume instanță, utilizare %) pentru toate instanțele; `None` dacă și a treia încercare a eșuat
+    /// (lista de instanțe se poate schimba între cele două apeluri și atunci PDH cere din nou un buffer mai mare).
+    fn read(&self) -> Option<Vec<(String, f64)>> {
+        (0..3).find_map(|_| unsafe {
             if PdhCollectQueryData(self.query) != 0 {
-                return Vec::new();
+                return None;
             }
             let (mut size, mut count) = (0u32, 0u32);
             if PdhGetFormattedCounterArrayW(self.counter, PDH_FMT_DOUBLE, &mut size, &mut count, None) != PDH_MORE_DATA {
-                return Vec::new();
+                return None;
             }
             let mut buf = vec![0u64; size as usize / 8 + 1]; // u64: aliniere pentru structurile PDH
             let items = buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
             if PdhGetFormattedCounterArrayW(self.counter, PDH_FMT_DOUBLE, &mut size, &mut count, Some(items)) != 0 {
-                return Vec::new();
+                return None;
             }
-            std::slice::from_raw_parts(items, count as usize)
-                .iter()
-                .filter(|i| i.FmtValue.CStatus <= 1) // valid / date noi
-                .map(|i| (i.szName.to_string().unwrap_or_default(), i.FmtValue.Anonymous.doubleValue))
-                .collect()
-        }
+            Some(
+                std::slice::from_raw_parts(items, count as usize)
+                    .iter()
+                    .filter(|i| i.FmtValue.CStatus <= 1) // valid / date noi
+                    .map(|i| (i.szName.to_string().unwrap_or_default(), i.FmtValue.Anonymous.doubleValue))
+                    .collect(),
+            )
+        })
     }
 }
 
@@ -290,7 +307,7 @@ fn ping_loop(stop: Arc<AtomicBool>, last: Arc<AtomicU32>) {
     unsafe {
         let Ok(handle) = IcmpCreateFile() else { return };
         let payload = [0x61u8; 32];
-        let mut reply = vec![0u64; (std::mem::size_of::<ICMP_ECHO_REPLY>() + payload.len() + 8) / 8 + 1];
+        let mut reply = vec![0u64; (std::mem::size_of::<ICMP_ECHO_REPLY>() + payload.len() + 8 + 32) / 8 + 1]; // + loc pentru IO_STATUS_BLOCK (x64)
         while !stop.load(Ordering::Relaxed) {
             let n = IcmpSendEcho(handle, u32::from_ne_bytes([1, 1, 1, 1]), payload.as_ptr().cast(), payload.len() as u16, None, reply.as_mut_ptr().cast(), (reply.len() * 8) as u32, 1000);
             let r = &*(reply.as_ptr() as *const ICMP_ECHO_REPLY);
@@ -325,11 +342,20 @@ pub struct Sample {
 /// se păstrează 30 s după ultima citire.
 const TEMP_EVERY: Duration = Duration::from_secs(5);
 const GPU_TEMP_KEEP: Duration = Duration::from_secs(30);
+/// La o citire PDH eșuată rămâne ultima valoare video încă 5 s, ca inelul să nu clipească.
+const GPU_KEEP: Duration = Duration::from_secs(5);
+/// Fără activitate pe placa NVIDIA atâta timp → NVML se închide (nu o ține trează); la reluare se deschide din nou.
+const NVML_IDLE: Duration = Duration::from_secs(30);
+/// O inițializare NVML eșuată se reîncearcă cel mult o dată pe minut.
+const NVML_RETRY: Duration = Duration::from_secs(60);
 
 struct Sampler {
     gpu: Option<Gpu>,
     nvidia: Option<String>,
-    nvml: Option<Option<Nvml>>, // None = neîncercat, Some(None) = indisponibil
+    nvml: Option<Nvml>, // deschis doar cât placa NVIDIA lucrează
+    nvml_failed_at: Option<Instant>,
+    last_busy: Option<Instant>,
+    gpu_last: Option<(f64, Instant)>,
     stop: Arc<AtomicBool>,
     ping: Arc<AtomicU32>,
     prev_cpu: Option<(u64, u64, u64)>,
@@ -356,6 +382,9 @@ impl Sampler {
             gpu,
             nvidia: nvidia_luid(),
             nvml: None,
+            nvml_failed_at: None,
+            last_busy: None,
+            gpu_last: None,
             stop,
             ping,
             prev_cpu: system_times(),
@@ -385,18 +414,34 @@ impl Sampler {
         self.prev_net = net_now;
 
         let (ram_used, ram_total) = memory();
-        let samples = self.gpu.as_ref().map(Gpu::read).unwrap_or_default();
+        let samples = match self.gpu.as_ref().map(Gpu::read) {
+            Some(Some(s)) => {
+                self.gpu_last = gpu_max(&s).map(|v| (v, now));
+                s
+            }
+            _ => Vec::new(), // citire eșuată (trecător): gpu_last rămâne
+        };
 
-        if self.last_wmi.map_or(true, |t| t.elapsed() >= TEMP_EVERY) {
+        if due(self.last_wmi, now, TEMP_EVERY) {
             self.last_wmi = Some(now);
             self.cpu_temp = cpu_temp();
         }
         let busy = self.nvidia.as_deref().is_some_and(|luid| dgpu_busy(&samples, luid));
-        if busy && self.last_nvml.map_or(true, |t| t.elapsed() >= TEMP_EVERY) {
-            self.last_nvml = Some(now);
-            if let Some(t) = self.nvml.get_or_insert_with(Nvml::open).as_ref().and_then(Nvml::temperature) {
-                self.gpu_temp = Some((t, now));
+        if busy {
+            self.last_busy = Some(now);
+            if self.nvml.is_none() && due(self.nvml_failed_at, now, NVML_RETRY) {
+                self.nvml = Nvml::open();
+                self.nvml_failed_at = self.nvml.is_none().then_some(now);
+                self.last_nvml = None;
             }
+            if self.nvml.is_some() && due(self.last_nvml, now, TEMP_EVERY) {
+                self.last_nvml = Some(now);
+                if let Some(t) = self.nvml.as_ref().and_then(Nvml::temperature) {
+                    self.gpu_temp = Some((t, now));
+                }
+            }
+        } else if self.nvml.is_some() && due(self.last_busy, now, NVML_IDLE) {
+            self.nvml = None; // Drop: nvmlShutdown + FreeLibrary
         }
 
         let ping = self.ping.load(Ordering::Relaxed);
@@ -404,8 +449,8 @@ impl Sampler {
             cpu,
             ram_used,
             ram_total,
-            gpu: gpu_max(&samples),
-            gpu_temp: self.gpu_temp.filter(|(_, at)| at.elapsed() < GPU_TEMP_KEEP).map(|(t, _)| t),
+            gpu: fresh(self.gpu_last, now, GPU_KEEP),
+            gpu_temp: fresh(self.gpu_temp, now, GPU_TEMP_KEEP),
             cpu_temp: self.cpu_temp,
             net_down,
             net_up,
@@ -518,13 +563,35 @@ mod tests {
         assert!(!dgpu_busy(&[("pid_1_luid_0x00000000_0x0000000B_phys_0".into(), 0.0)], "0x00000000_0x0000000B")); // utilizare 0
     }
 
+    #[test]
+    fn interfete_fizice() {
+        assert!(is_physical_up(IF_TYPE_ETHERNET_CSMACD, true, 0b01)); // Ethernet hardware, activ
+        assert!(is_physical_up(IF_TYPE_IEEE80211, true, 0b01)); // Wi-Fi
+        assert!(!is_physical_up(IF_TYPE_ETHERNET_CSMACD, true, 0b00)); // vEthernet/TAP: fără bitul hardware
+        assert!(!is_physical_up(IF_TYPE_ETHERNET_CSMACD, true, 0b11)); // interfață de filtrare
+        assert!(!is_physical_up(IF_TYPE_ETHERNET_CSMACD, false, 0b01)); // oprită
+        assert!(!is_physical_up(24, true, 0b01)); // loopback
+    }
+
+    #[test]
+    fn momente_si_valori_proaspete() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        assert!(due(None, t0, s(5)));
+        assert!(!due(Some(t0), t0 + s(4), s(5)));
+        assert!(due(Some(t0), t0 + s(5), s(5)));
+        assert_eq!(fresh(Some((42.0, t0)), t0 + s(4), s(5)), Some(42.0));
+        assert_eq!(fresh(Some((42.0, t0)), t0 + s(5), s(5)), None);
+        assert_eq!(fresh::<f64>(None, t0, s(5)), None);
+    }
+
     /// Citește senzorii reali și îi tipărește: `cargo test -- --ignored --nocapture esantion_real`
     #[test]
     #[ignore]
     fn esantion_real() {
         let mut sampler = Sampler::new();
         println!("LUID NVIDIA: {:?}", sampler.nvidia);
-        let instances = sampler.gpu.as_ref().map(Gpu::read).unwrap_or_default();
+        let instances = sampler.gpu.as_ref().and_then(Gpu::read).unwrap_or_default();
         let mut luids: Vec<_> = instances.iter().filter_map(|(n, _)| luid_of(n)).collect();
         luids.sort();
         luids.dedup();

@@ -76,7 +76,7 @@ export function init(island) {
 
   function rowsOf(s) {
     const ramPct = s.ram_total ? (s.ram_used / s.ram_total) * 100 : null;
-    const temps = [['CPU', s.cpu_temp], ['GPU', s.gpu_temp]].filter(([, v]) => v != null);
+    const temps = [[t('system.tempCpu'), s.cpu_temp], [t('system.tempGpu'), s.gpu_temp]].filter(([, v]) => v != null);
     const hottest = temps.length ? Math.max(...temps.map(([, v]) => v)) : null;
     return {
       cpu: s.cpu == null ? null : { v: s.cpu, text: `${Math.round(s.cpu)}%`, sub: '', warn: level(s.cpu, WARN_PCT) },

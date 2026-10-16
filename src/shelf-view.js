@@ -77,6 +77,7 @@ export function init(island) {
     let start = null;
     c.addEventListener('pointerdown', (e) => { if (e.button === 0 && it.exists) start = { x: e.clientX, y: e.clientY }; });
     c.addEventListener('pointermove', (e) => {
+      if (start && !(e.buttons & 1)) { start = null; return; } // butonul a fost eliberat în afara elementului
       if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
       start = null;
       invoke('shelf_drag_out', { path: it.path }).catch((err) => invoke('log_js', { msg: `raft: tragerea a eșuat: ${err}` }));

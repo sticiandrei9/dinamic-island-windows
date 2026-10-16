@@ -18,6 +18,8 @@ const WINDOW_MS: u64 = 3000;
 const STALL_MS: u64 = 60_000;
 /// Un fișier nou e rezultatul unui temporar dispărut dacă a fost creat la cel mult atât de dispariție.
 const MATCH_MS: u64 = 2000;
+/// Un fișier nou, fără temporar văzut, e o descărcare terminată dacă a fost creat de cel mult atât (descărcări foarte scurte).
+const FRESH_MS: u64 = 5000;
 const TEMP_EXT: [&str; 2] = [".crdownload", ".part"];
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -72,6 +74,8 @@ pub struct Tracker {
     temps: BTreeMap<String, Temp>,
     /// Fișierele (non-temporare) din ultimul pas: ce nu era aici e „nou”.
     known: HashSet<String>,
+    /// După prima listare (pornire sau modul reactivat) ce e deja în folder nu se anunță.
+    started: bool,
 }
 
 impl Tracker {
@@ -82,8 +86,10 @@ impl Tracker {
 
         let mut done = Vec::new();
         let mut claimed = HashSet::new();
+        // Chrome redenumește „Neconfirmat N” în „nume.ext.crdownload” când începe descărcarea: continuă ca temporarul nou
+        let new_temp = temps.iter().any(|(n, _, _)| !self.temps.contains_key(n));
         for (tname, tmp) in &self.temps {
-            if temps.iter().any(|(n, _, _)| n == tname) {
+            if temps.iter().any(|(n, _, _)| n == tname) || (tmp.name.is_none() && new_temp) {
                 continue;
             }
             let found = match &tmp.name {
@@ -98,6 +104,14 @@ impl Tracker {
                 done.push(Done { name: f.clone(), bytes: *size });
             }
         }
+        if self.started {
+            for (f, size, c) in &files {
+                if !self.known.contains(f) && !claimed.contains(f) && now_ms.saturating_sub(*c) <= FRESH_MS {
+                    done.push(Done { name: f.clone(), bytes: *size });
+                }
+            }
+        }
+        self.started = true;
 
         let mut next = BTreeMap::new();
         for (n, size, created) in temps {
@@ -156,9 +170,11 @@ fn list_dir(dir: &std::path::Path) -> Vec<(String, u64, u64)> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     rd.flatten()
         .filter_map(|e| {
-            let m = e.metadata().ok().filter(|m| m.is_file())?;
+            let name = e.file_name().into_string().ok()?;
+            // intrarea din director e actualizată leneș pentru un fișier în scriere: la temporare deschidem fișierul (mărimea reală)
+            let m = if strip_temp(&name).is_some() { std::fs::metadata(e.path()) } else { e.metadata() }.ok().filter(|m| m.is_file())?;
             let created = m.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
-            Some((e.file_name().into_string().ok()?, m.len(), created))
+            Some((name, m.len(), created))
         })
         .collect()
 }
@@ -259,6 +275,36 @@ mod tests {
         t.step(&[("x.zip.crdownload".into(), 10, 0)], 0);
         let (a, d) = t.step(&[], 1000);
         assert!(a.is_empty() && d.is_empty());
+    }
+
+    #[test]
+    fn descarcare_rapida_fara_temporar() {
+        let mut t = Tracker::default();
+        t.step(&[("vechi.pdf".into(), 5, 0)], 100_000);
+        let (a, d) = t.step(&[("vechi.pdf".into(), 5, 0), ("mic.zip".into(), 700, 100_500)], 101_000);
+        assert!(a.is_empty());
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].name, "mic.zip");
+        // fișierul vechi nu devine „terminat”, iar cel anunțat o dată nu se mai anunță
+        let (_, d) = t.step(&[("vechi.pdf".into(), 5, 0), ("mic.zip".into(), 700, 100_500)], 102_000);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn prima_listare_nu_anunta() {
+        let mut t = Tracker::default();
+        let (_, d) = t.step(&[("proaspat.zip".into(), 700, 99_900)], 100_000);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn redenumire_temporar_nu_e_terminata() {
+        let mut t = Tracker::default();
+        t.step(&[("Neconfirmat 1.crdownload".into(), 10, 0)], 0);
+        // Chrome redenumește temporarul când începe descărcarea; „vechi.pdf” (creat odată cu el) nu e rezultatul lui
+        let (a, d) = t.step(&[("film.mp4.crdownload".into(), 20, 9000), ("vechi.pdf".into(), 5, 0)], 10_000);
+        assert!(d.is_empty());
+        assert_eq!(a[0].name, "film.mp4");
     }
 
     #[test]

@@ -78,6 +78,7 @@ export function init(island) {
   let start = null;
   file.addEventListener('pointerdown', (e) => { if (e.button === 0) start = { x: e.clientX, y: e.clientY }; });
   file.addEventListener('pointermove', (e) => {
+    if (start && !(e.buttons & 1)) { start = null; return; } // butonul a fost eliberat în afara elementului
     const d = current();
     if (!start || !d || Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
     start = null;

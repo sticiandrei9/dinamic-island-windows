@@ -179,6 +179,11 @@ impl SettingsState {
 }
 
 impl Settings {
+    /// Scurtătura notițelor efectiv înregistrată: goală (dezînregistrată) cât modulul Notițe e oprit.
+    pub fn notes_combo(&self) -> &str {
+        if self.modules.notes { &self.notes_hotkey } else { "" }
+    }
+
     /// Limba efectivă: cea aleasă sau, la „auto”, limba interfeței Windows.
     pub fn lang(&self) -> crate::i18n::Lang {
         crate::i18n::resolve(&self.language, crate::i18n::windows_ui_lang())
@@ -221,8 +226,8 @@ pub fn set_settings(app: AppHandle, state: tauri::State<SettingsState>, mut sett
     if previous.hotkey != settings.hotkey {
         crate::hotkey::apply_and_report(&settings.hotkey);
     }
-    if previous.notes_hotkey != settings.notes_hotkey {
-        crate::hotkey::apply_notes_and_report(&settings.notes_hotkey);
+    if previous.notes_combo() != settings.notes_combo() {
+        crate::hotkey::apply_notes_and_report(settings.notes_combo());
     }
     if previous.language != settings.language {
         crate::i18n::set_current(settings.lang());
@@ -346,6 +351,15 @@ mod tests {
         assert_eq!(Size::Small.scale(), 0.85);
         assert_eq!(Size::Normal.scale(), 1.0);
         assert_eq!(Size::Large.scale(), 1.15);
+    }
+
+    #[test]
+    fn scurtatura_notitelor_doar_cu_modulul_pornit() {
+        let mut s = Settings::default();
+        s.notes_hotkey = "Win+Shift+N".into();
+        assert_eq!(s.notes_combo(), "Win+Shift+N");
+        s.modules.notes = false; // modul oprit: scurtătura se dezînregistrează
+        assert_eq!(s.notes_combo(), "");
     }
 
     #[test]

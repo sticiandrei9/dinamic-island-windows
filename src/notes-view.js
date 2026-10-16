@@ -31,6 +31,7 @@ export function init(island) {
   let badge = -1;
   let hotkeyOpen = false; // deschisă cu scurtătura (cursorul poate fi în altă parte)
   let hideTimer = 0;
+  let adding = false;
 
   function texts() {
     input.placeholder = t('notes.placeholder');
@@ -98,6 +99,8 @@ export function init(island) {
     if (hotkeyOpen && !island.hovering) hideTimer = setTimeout(() => { if (!island.hovering) island.collapse(); }, 1500);
   }
   input.addEventListener('focus', grab);
+  // fereastra nu e activă (NOACTIVATE), deci `focus` nu vine la click: activăm la apăsare (al doilea grab e inofensiv)
+  input.addEventListener('pointerdown', grab);
   input.addEventListener('blur', release);
   input.addEventListener('keydown', (e) => {
     e.stopPropagation();
@@ -105,8 +108,13 @@ export function init(island) {
       e.preventDefault();
       const text = input.value.trim();
       if (!text) { input.blur(); return; }
-      input.value = '';
-      call('notes_add', { text }).then(() => input.blur()).catch(() => { input.value = text; });
+      if (adding) return; // al doilea Enter cât salvarea nu s-a încheiat n-are voie să dubleze notița
+      adding = true;
+      // textul rămâne în câmp până la succes; la eroare (salvare eșuată) rămâne pentru o nouă încercare
+      call('notes_add', { text })
+        .then(() => { input.value = ''; input.blur(); })
+        .catch(() => {})
+        .finally(() => { adding = false; });
     } else if (e.key === 'Escape') {
       e.preventDefault();
       input.blur();

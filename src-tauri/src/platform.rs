@@ -72,6 +72,22 @@ pub fn can_refocus(prev: isize, win: &WebviewWindow) -> bool {
     unsafe { IsWindow(HWND(prev as *mut core::ffi::c_void)).as_bool() && Some(GetForegroundWindow()) == hwnd_of(win) }
 }
 
+/// Insula e fereastra din prim-plan.
+pub fn is_foreground(win: &WebviewWindow) -> bool {
+    unsafe { Some(GetForegroundWindow()) == hwnd_of(win) }
+}
+
+/// Dă prim-planul ferestrei desktopului (când nu mai există o fereastră de dinainte).
+pub fn focus_shell() {
+    use windows::Win32::UI::WindowsAndMessaging::GetShellWindow;
+    unsafe {
+        let shell = GetShellWindow();
+        if !shell.0.is_null() {
+            let _ = SetForegroundWindow(shell);
+        }
+    }
+}
+
 /// Redă focusul ferestrei de dinainte (insula e în prim-plan, deci Windows permite).
 pub fn focus_previous(prev: isize) {
     unsafe {

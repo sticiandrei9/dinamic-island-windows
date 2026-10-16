@@ -140,7 +140,7 @@ fn main() {
             i18n::set_current(loaded.lang());
             tray::sync_autostart(app.handle(), loaded.autostart);
             let loaded_hotkey = loaded.hotkey.clone();
-            let loaded_notes_hotkey = loaded.notes_hotkey.clone();
+            let loaded_notes_hotkey = loaded.notes_combo().to_string();
             app.manage(settings::SettingsState { current: std::sync::Mutex::new(loaded), path });
             app.manage(shelf::ShelfState::load(app.path().app_config_dir()?.join("shelf.json")));
             app.manage(notes::NotesState::load(app.path().app_config_dir()?.join("notes.json")));

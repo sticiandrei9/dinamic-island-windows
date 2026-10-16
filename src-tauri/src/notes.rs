@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,9 +49,38 @@ pub fn next_id(list: &[Note]) -> u64 {
     list.iter().map(|n| n.id).max().unwrap_or(0) + 1
 }
 
-/// Un fișier lipsă sau stricat dă o listă goală (notițele nu sunt critice, aplicația nu trebuie să cadă).
-pub fn load(path: &Path) -> Vec<Note> {
-    std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum LoadNote {
+    Loaded,
+    Missing,
+    /// JSON stricat: fișierul a fost mutat în `notes.corrupt.json`, nu rămâne sub numele în care se scrie
+    Corrupt,
+    /// citire imposibilă (blocat de OneDrive / antivirus): nu scriem peste el
+    Unreadable,
+}
+
+/// Mută un `notes.json` stricat lângă el, fără să calce un fișier stricat mai vechi.
+fn set_aside(path: &Path) {
+    let mut target = path.with_file_name("notes.corrupt.json");
+    if target.exists() {
+        target = path.with_file_name(format!("notes.corrupt-{}.json", now_secs()));
+    }
+    let _ = std::fs::rename(path, target);
+}
+
+/// Citește lista; niciodată nu pierde în tăcere un fișier existent (vezi `LoadNote`).
+pub fn load(path: &Path) -> (Vec<Note>, LoadNote) {
+    match std::fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(list) => (list, LoadNote::Loaded),
+            Err(_) => {
+                set_aside(path);
+                (Vec::new(), LoadNote::Corrupt)
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), LoadNote::Missing),
+        Err(_) => (Vec::new(), LoadNote::Unreadable),
+    }
 }
 
 /// Scriere atomică: fișier temporar, apoi redenumire peste cel vechi.
@@ -66,11 +96,37 @@ pub fn save(path: &Path, list: &[Note]) -> std::io::Result<()> {
 pub struct NotesState {
     items: Mutex<Vec<Note>>,
     path: PathBuf,
+    /// fișierul exista, dar n-a putut fi citit: nu scriem până nu se citește cu succes
+    blocked: AtomicBool,
 }
 
 impl NotesState {
     pub fn load(path: PathBuf) -> Self {
-        Self { items: Mutex::new(load(&path)), path }
+        let (mut items, mut note) = load(&path);
+        if note == LoadNote::Unreadable {
+            std::thread::sleep(std::time::Duration::from_millis(250)); // blocaje scurte (sincronizare, antivirus)
+            (items, note) = load(&path);
+        }
+        match note {
+            LoadNote::Corrupt => log::warn!("notes.json corupt; mutat în notes.corrupt.json, pornesc cu lista goală"),
+            LoadNote::Unreadable => log::warn!("notes.json nu poate fi citit; nu scriu peste el până nu se poate citi"),
+            _ => {}
+        }
+        Self { items: Mutex::new(items), path, blocked: AtomicBool::new(note == LoadNote::Unreadable) }
+    }
+
+    /// Cât fișierul e blocat, încercăm din nou citirea; true dacă putem lucra.
+    fn unblock(&self, items: &mut Vec<Note>) -> bool {
+        if !self.blocked.load(Ordering::Relaxed) {
+            return true;
+        }
+        let (list, note) = load(&self.path);
+        if note == LoadNote::Unreadable {
+            return false;
+        }
+        *items = list;
+        self.blocked.store(false, Ordering::Relaxed);
+        true
     }
 }
 
@@ -82,18 +138,23 @@ fn now_secs() -> u64 {
 fn update(app: &AppHandle, f: impl FnOnce(Vec<Note>) -> Result<Vec<Note>, String>) -> Result<(), String> {
     let state = app.state::<NotesState>();
     let mut items = state.items.lock().unwrap();
-    // lista rămâne neatinsă dacă `f` refuză (notiță goală / prea lungă)
-    *items = f(items.clone())?;
-    let saved = save(&state.path, &items).map_err(|e| e.to_string());
-    let snapshot = items.clone();
+    if !state.unblock(&mut items) {
+        return Err("notes.json nu poate fi citit".into());
+    }
+    // lista rămâne neatinsă (în memorie și pe ecran) dacă `f` refuză (notiță goală / prea lungă) sau salvarea eșuează
+    let next = f(items.clone())?;
+    save(&state.path, &next).map_err(|e| e.to_string())?;
+    *items = next.clone();
     drop(items);
-    let _ = app.emit("notes-changed", snapshot);
-    saved
+    let _ = app.emit("notes-changed", next);
+    Ok(())
 }
 
 #[tauri::command]
 pub fn notes_list(state: tauri::State<NotesState>) -> Vec<Note> {
-    state.items.lock().unwrap().clone()
+    let mut items = state.items.lock().unwrap();
+    state.unblock(&mut items);
+    items.clone()
 }
 
 #[tauri::command]
@@ -175,7 +236,15 @@ pub fn notes_focus(app: AppHandle, window: WebviewWindow, on: bool) -> Result<()
             let alive = st.prev.is_some_and(|p| crate::platform::can_refocus(p, &window));
             match focus_restore_plan(st.active, st.prev, alive) {
                 FocusStep::Nothing => {}
-                FocusStep::RestoreStyle => crate::platform::set_no_activate(&window, true),
+                FocusStep::RestoreStyle => {
+                    let still_ours = crate::platform::is_foreground(&window);
+                    crate::platform::set_no_activate(&window, true);
+                    // fără fereastră de dinainte, insula nu păstrează tastatura (scrisul ar ajunge în ea): o dăm desktopului;
+                    // dacă utilizatorul a ales deja altă fereastră, n-o atingem
+                    if still_ours {
+                        crate::platform::focus_shell();
+                    }
+                }
                 FocusStep::RestoreStyleAndFocus(p) => {
                     crate::platform::set_no_activate(&window, true);
                     crate::platform::focus_previous(p);
@@ -249,12 +318,40 @@ mod tests {
         let l = add(vec![], "lapte", 1, 10).unwrap();
         save(&p, &l).unwrap();
         save(&p, &toggle(l.clone(), 1)).unwrap();
-        let back = load(&p);
+        let (back, note) = load(&p);
+        assert_eq!(note, LoadNote::Loaded);
         assert!(back[0].done && back[0].text == "lapte" && back[0].at == 10);
         assert!(!d.join("notes.json.tmp").exists());
-        assert!(load(&d.join("lipsa.json")).is_empty());
+        let (empty, note) = load(&d.join("lipsa.json"));
+        assert!(empty.is_empty() && note == LoadNote::Missing);
+    }
+
+    #[test]
+    fn fisier_stricat_mutat_nu_suprascris() {
+        let d = temp_dir("stricat");
+        let p = d.join("notes.json");
         std::fs::write(&p, "{ nu e json").unwrap();
-        assert!(load(&p).is_empty()); // fișier stricat: listă goală, fără panică
+        let (l, note) = load(&p);
+        assert!(l.is_empty() && note == LoadNote::Corrupt);
+        assert!(!p.exists());
+        assert_eq!(std::fs::read_to_string(d.join("notes.corrupt.json")).unwrap(), "{ nu e json");
+        // al doilea fișier stricat nu-l calcă pe primul
+        std::fs::write(&p, "alt gunoi").unwrap();
+        assert_eq!(load(&p).1, LoadNote::Corrupt);
+        assert_eq!(std::fs::read_to_string(d.join("notes.corrupt.json")).unwrap(), "{ nu e json");
+        let altul = std::fs::read_dir(&d).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with("notes.corrupt-")).count();
+        assert_eq!(altul, 1);
+    }
+
+    #[test]
+    fn citire_imposibila_nu_e_lipsa() {
+        let d = temp_dir("nelizibil");
+        // un director în locul fișierului: citirea eșuează cu altceva decât NotFound
+        let p = d.join("notes.json");
+        std::fs::create_dir(&p).unwrap();
+        let (l, note) = load(&p);
+        assert!(l.is_empty() && note == LoadNote::Unreadable);
+        assert!(p.is_dir()); // neatins
     }
 
     #[test]

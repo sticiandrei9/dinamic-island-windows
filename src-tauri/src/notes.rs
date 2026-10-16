@@ -59,24 +59,36 @@ pub enum LoadNote {
     Unreadable,
 }
 
-/// Mută un `notes.json` stricat lângă el, fără să calce un fișier stricat mai vechi.
-fn set_aside(path: &Path) {
+/// Mută un `notes.json` stricat lângă el, fără să calce un fișier stricat mai vechi. False dacă mutarea eșuează.
+fn set_aside(path: &Path, now: u64) -> bool {
     let mut target = path.with_file_name("notes.corrupt.json");
     if target.exists() {
-        target = path.with_file_name(format!("notes.corrupt-{}.json", now_secs()));
+        target = path.with_file_name(format!("notes.corrupt-{now}.json"));
     }
-    let _ = std::fs::rename(path, target);
+    match std::fs::rename(path, &target) {
+        Ok(()) => {
+            log::warn!("notes.json corupt; mutat în {}", target.display());
+            true
+        }
+        Err(e) => {
+            log::warn!("notes.json corupt și nu poate fi mutat ({e}); nu scriu peste el");
+            false
+        }
+    }
 }
 
-/// Citește lista; niciodată nu pierde în tăcere un fișier existent (vezi `LoadNote`).
 pub fn load(path: &Path) -> (Vec<Note>, LoadNote) {
+    load_at(path, now_secs())
+}
+
+/// Citește lista; niciodată nu pierde în tăcere un fișier existent (vezi `LoadNote`). `Corrupt` doar dacă
+/// fișierul stricat a fost mutat; dacă mutarea eșuează (blocat), e `Unreadable` și scrierile rămân blocate.
+fn load_at(path: &Path, now: u64) -> (Vec<Note>, LoadNote) {
     match std::fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str(&text) {
             Ok(list) => (list, LoadNote::Loaded),
-            Err(_) => {
-                set_aside(path);
-                (Vec::new(), LoadNote::Corrupt)
-            }
+            Err(_) if set_aside(path, now) => (Vec::new(), LoadNote::Corrupt),
+            Err(_) => (Vec::new(), LoadNote::Unreadable),
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), LoadNote::Missing),
         Err(_) => (Vec::new(), LoadNote::Unreadable),
@@ -108,7 +120,6 @@ impl NotesState {
             (items, note) = load(&path);
         }
         match note {
-            LoadNote::Corrupt => log::warn!("notes.json corupt; mutat în notes.corrupt.json, pornesc cu lista goală"),
             LoadNote::Unreadable => log::warn!("notes.json nu poate fi citit; nu scriu peste el până nu se poate citi"),
             _ => {}
         }
@@ -341,6 +352,22 @@ mod tests {
         assert_eq!(std::fs::read_to_string(d.join("notes.corrupt.json")).unwrap(), "{ nu e json");
         let altul = std::fs::read_dir(&d).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with("notes.corrupt-")).count();
         assert_eq!(altul, 1);
+    }
+
+    #[test]
+    fn mutare_esuata_ramane_blocata_nu_corupta() {
+        let d = temp_dir("mutare-esuata");
+        let p = d.join("notes.json");
+        std::fs::write(&p, "{ nu e json").unwrap();
+        // ambele nume posibile ocupate de directoare nevide: redenumirea eșuează determinist
+        for name in ["notes.corrupt.json", "notes.corrupt-1000.json"] {
+            std::fs::create_dir(d.join(name)).unwrap();
+            std::fs::write(d.join(name).join("x"), "x").unwrap();
+        }
+        let (l, note) = load_at(&p, 1000);
+        assert!(l.is_empty());
+        assert_eq!(note, LoadNote::Unreadable); // nu Corrupt: altfel următoarea salvare ar suprascrie fișierul stricat
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{ nu e json"); // neatins
     }
 
     #[test]

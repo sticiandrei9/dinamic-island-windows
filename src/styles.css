@@ -40,7 +40,9 @@ img { -webkit-user-drag: none; user-select: none; }
 #compact[data-kind="timer"] .c-timer,
 #compact[data-kind="stopwatch"] .c-timer,
 #compact[data-kind="call"] .c-call,
-#compact[data-kind="meeting"] .c-meet { display: flex; }
+#compact[data-kind="meeting"] .c-meet,
+#compact[data-kind="claude"] .c-claude,
+#compact[data-kind="claude-waiting"] .c-claude { display: flex; }
 #compact .art { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; }
 #compact[data-kind=""] .dots { margin-left: auto; }
 body.expanded #compact, body.transient #compact { opacity: 0; filter: blur(6px); pointer-events: none; }
@@ -78,6 +80,12 @@ body.mic-on .dot.mic, body.cam-on .dot.cam { display: block; animation: dot-in .
 #bubble > * { display: none; }
 #bubble[data-kind="media"] #b-art { display: block; width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
 #bubble[data-kind="timer"] #b-ring, #bubble[data-kind="stopwatch"] #b-ring { display: block; width: 26px; height: 26px; transform: rotate(-90deg); }
+/* Claude Code în bulă: aceeași steluță, portocalie când te așteaptă */
+#b-claude { width: 20px; height: 20px; color: var(--fg); }
+#b-claude svg { width: 18px; height: 18px; }
+#bubble[data-kind="claude"] #b-claude, #bubble[data-kind="claude-waiting"] #b-claude { display: block; }
+#bubble[data-kind="claude"] #b-claude { animation: pulse 1.4s ease-in-out infinite; }
+#bubble[data-kind="claude-waiting"] #b-claude { color: var(--orange); }
 #b-ring circle { fill: none; stroke-width: 3; }
 #b-ring .bg { stroke: rgba(255, 159, 10, .25); }
 #b-ring .fg { stroke: var(--orange); stroke-linecap: round; stroke-dasharray: 69.1; transition: stroke-dashoffset .5s linear; }
@@ -98,10 +106,12 @@ body.transient #transient {
 #transient[data-kind="alert"] .t-alert,
 #transient[data-kind="update"] .t-alert,
 #transient[data-kind="kb"] .t-alert,
+#transient[data-kind="claude"] .t-alert,
 #transient[data-kind="volume"] .t-volume,
 #transient[data-kind="notification"] .t-notif,
 #transient[data-kind="screenshot"] .t-shot { display: flex; }
-body.transient #transient[data-kind="screenshot"] { pointer-events: auto; }
+body.transient #transient[data-kind="screenshot"], body.transient #transient[data-kind="claude"] { pointer-events: auto; }
+body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .t-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--t-color, var(--fg)); }
 .t-icon svg { width: 21px; height: 21px; }
 .t-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
@@ -195,6 +205,20 @@ body.no-apps .apps { display: none; }
 
 .c-meet { color: #64d2ff; gap: 8px; justify-content: flex-start !important; }
 .c-meet-text { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Claude Code: steluța pulsează cât lucrează și e portocalie când te așteaptă */
+#compact .c-claude { gap: 8px; justify-content: flex-start; }
+.c-claude-text { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#compact[data-kind="claude"] .c-claude .c-icon { animation: pulse 1.4s ease-in-out infinite; }
+#compact[data-kind="claude-waiting"] .c-claude { color: var(--orange); }
+.claude-row { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 8px; font-size: 12px; color: var(--fg2); }
+.claude-row[hidden] { display: none; }
+.claude-item { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 8px; border-radius: 8px; white-space: nowrap; overflow: hidden; cursor: pointer; animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
+.claude-item:hover { background: rgba(255, 255, 255, .08); }
+.claude-item svg { width: 13px; height: 13px; flex: none; color: var(--fg); }
+.claude-item b { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.claude-item.working svg { animation: pulse 1.4s ease-in-out infinite; }
+.claude-item.waiting svg, .claude-item.waiting .st { color: var(--orange); }
+@keyframes claude-in { from { opacity: 0; filter: blur(6px); transform: scale(.94); } }
 .cal-row { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; }
 .cal-row[hidden] { display: none; }
 .cal-row { cursor: pointer; border-radius: 8px; padding: 2px 8px; margin-left: auto; margin-right: auto; width: fit-content; max-width: 100%; }

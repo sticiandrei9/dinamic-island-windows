@@ -36,7 +36,33 @@ function renderModules() {
     sw.append(input, document.createElement('span'));
     row.append(label, sw);
     box.append(row);
+    if (key === 'claude') box.append(claudeStatusRow());
   }
+}
+
+// starea hook-ului Claude sub comutator: instalat / lipsește (+ Instalează) / build de dezvoltare / eroare
+function claudeStatusRow() {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.hidden = true;
+  const label = document.createElement('div');
+  label.className = 'label';
+  const small = document.createElement('small');
+  label.append(small);
+  const btn = Object.assign(document.createElement('button'), { className: 'btn', textContent: t('settings.claudeInstall'), hidden: true });
+  row.append(label, btn);
+  const fill = async () => {
+    const st = await invoke('claude_hook_status').catch(() => 'missing');
+    const kind = typeof st === 'string' ? st : Object.keys(st)[0];
+    const failed = kind === 'dev' || kind === 'invalid';
+    row.hidden = !settings.modules.claude && !failed; // oprit și fără eșec: nimic de arătat
+    small.className = failed ? 'error' : '';
+    small.textContent = kind === 'invalid' ? t('settings.claudeInvalid', { v: st.invalid }) : t(`settings.claude${kind[0].toUpperCase()}${kind.slice(1)}`);
+    btn.hidden = kind !== 'missing';
+  };
+  btn.addEventListener('click', async () => { await invoke('claude_hook_install').catch(() => {}); fill(); });
+  fill();
+  return row;
 }
 
 function renderControls() {

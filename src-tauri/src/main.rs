@@ -2,6 +2,7 @@
 
 mod alerts;
 mod calendar;
+mod claude;
 mod claude_hook;
 mod dev_demo;
 mod displays;
@@ -89,6 +90,10 @@ fn main() {
             output::audio_set_output,
             calendar::calendar_fetch,
             calendar::calendar_open,
+            claude::claude_sessions,
+            claude::claude_focus,
+            claude::claude_hook_status,
+            claude::claude_hook_install,
             hotkey::hotkey_error,
             privacy::set_mirror_active,
             privacy::privacy_current,
@@ -128,6 +133,7 @@ fn main() {
             displays::sync_windows(app.handle());
             displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());
+            claude::spawn(app.handle().clone());
             media::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             privacy::spawn(app.handle().clone());

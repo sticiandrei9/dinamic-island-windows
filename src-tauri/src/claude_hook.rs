@@ -1,7 +1,6 @@
 //! Hook-ul Claude Code: instalează intrările în `~/.claude/settings.json` și,
 //! rulat cu `--claude-hook`, scrie starea sesiunii într-un fișier mic și iese
 //! înainte să pornească Tauri. Fișierele sunt citite de watcher-ul din aplicație.
-#![allow(dead_code)] // consumatorii (watcher, setări) vin în sarcinile următoare
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -29,12 +28,14 @@ pub struct SessionFile {
     pub at: u64,
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+/// `Dev`: aplicația rulează dintr-un build temporar (`.cargo-target`), deci hook-ul nu se instalează.
+#[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum HookStatus {
     Installed,
     Missing,
     Invalid(String),
+    Dev,
 }
 
 // ---------- logica pură ----------
@@ -111,7 +112,7 @@ pub fn remove_hooks(mut v: Value) -> Value {
     v
 }
 
-fn session_file_name(id: &str) -> Option<String> {
+pub fn session_file_name(id: &str) -> Option<String> {
     let ok = !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     // nume rezervate Windows (CON, NUL, COM1…): `con.json` ar deschide dispozitivul, nu un fișier
     let lower = id.to_ascii_lowercase();

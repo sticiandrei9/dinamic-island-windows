@@ -28,6 +28,7 @@ export const ICONS = {
   vpn: svg('<path d="M12 2.5 4.5 5.5v5.5c0 5 3.3 8.5 7.5 10.5 4.2-2 7.5-5.5 7.5-10.5V5.5z"/><path d="m9 12 2 2 4-4"/>'),
   calendar: svg('<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
   camera: svg('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10.5 5-3v9l-5-3"/>'),
+  sparkle: svg('<path d="M12 3c.6 4.8 3.2 7.4 8 9-4.8 1.6-7.4 4.2-8 9-.6-4.8-3.2-7.4-8-9 4.8-1.6 7.4-4.2 8-9z"/>'),
 };
 
 // Difuzor cu 0–3 unde (sau tăiat, la mute).

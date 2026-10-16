@@ -199,7 +199,22 @@
     "module.calendar.hint": "Următoarea întâlnire, cu 10 minute înainte",
     "settings.calendarOk": "Calendarul a fost citit. Linkul rămâne doar pe acest PC.",
     "settings.calendarError": "Linkul nu merge ({v}). Verifică adresa secretă iCal.",
-    "cal.join": "Intră"
+    "cal.join": "Intră",
+    "claude.sessions": {
+      "one": "{n} sesiune",
+      "few": "{n} sesiuni",
+      "other": "{n} de sesiuni"
+    },
+    "claude.waiting": "Claude te așteaptă",
+    "claude.done": "Claude a terminat",
+    "claude.state.working": "lucrează",
+    "claude.state.waiting": "te așteaptă",
+    "claude.min": "{n} min",
+    "settings.claudeInstalled": "Hook-ul Claude e instalat.",
+    "settings.claudeMissing": "Hook-ul Claude lipsește.",
+    "settings.claudeInstall": "Instalează",
+    "settings.claudeDev": "Versiune de dezvoltare: hook-ul nu se instalează dintr-un build temporar.",
+    "settings.claudeInvalid": "Hook-ul Claude nu s-a putut instala: {v}"
   },
   "en": {
     "tab.home": "Home",
@@ -396,7 +411,21 @@
     "module.calendar.hint": "Next meeting, 10 minutes ahead",
     "settings.calendarOk": "Calendar read. The link stays on this PC.",
     "settings.calendarError": "The link does not work ({v}). Check the secret iCal address.",
-    "cal.join": "Join"
+    "cal.join": "Join",
+    "claude.sessions": {
+      "one": "{n} session",
+      "other": "{n} sessions"
+    },
+    "claude.waiting": "Claude is waiting for you",
+    "claude.done": "Claude is done",
+    "claude.state.working": "working",
+    "claude.state.waiting": "waiting for you",
+    "claude.min": "{n} min",
+    "settings.claudeInstalled": "Claude hook installed.",
+    "settings.claudeMissing": "Claude hook is missing.",
+    "settings.claudeInstall": "Install",
+    "settings.claudeDev": "Development build: the hook is not installed from a temporary build.",
+    "settings.claudeInvalid": "The Claude hook could not be installed: {v}"
   },
   "ru": {
     "tab.home": "Главная",
@@ -603,6 +632,22 @@
     "module.calendar.hint": "Следующая встреча, за 10 минут",
     "settings.calendarOk": "Календарь прочитан. Ссылка хранится только на этом ПК.",
     "settings.calendarError": "Ссылка не работает ({v}). Проверьте закрытый адрес iCal.",
-    "cal.join": "Войти"
+    "cal.join": "Войти",
+    "claude.sessions": {
+      "one": "{n} сессия",
+      "few": "{n} сессии",
+      "many": "{n} сессий",
+      "other": "{n} сессии"
+    },
+    "claude.waiting": "Claude ждёт вас",
+    "claude.done": "Claude закончил",
+    "claude.state.working": "работает",
+    "claude.state.waiting": "ждёт вас",
+    "claude.min": "{n} мин",
+    "settings.claudeInstalled": "Хук Claude установлен.",
+    "settings.claudeMissing": "Хук Claude отсутствует.",
+    "settings.claudeInstall": "Установить",
+    "settings.claudeDev": "Сборка для разработки: хук не устанавливается из временной сборки.",
+    "settings.claudeInvalid": "Не удалось установить хук Claude: {v}"
   }
 }

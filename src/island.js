@@ -221,7 +221,7 @@ function tickTransient() {
 
 function renderTransient(t) {
   transientEl.dataset.kind = t.kind;
-  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb') {
+  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb' || t.kind === 'claude') {
     transientEl.style.setProperty('--t-color', t.color ?? 'var(--fg)');
     $('t-icon').innerHTML = ICONS[t.icon] ?? ICONS.bell;
     $('t-title').textContent = t.title ?? '';
@@ -486,6 +486,17 @@ function startDemo() {
   if (p.has('timer')) setTimeout(() => island.setActivity('timer', { kind: 'timer', progress: 0.6 }), 1200);
   if (p.has('alert')) setTimeout(() => island.pushTransient({ kind: 'alert', icon: 'headphones', title: 'AirPods Pro', detail: 'Conectat', level: 0.8, color: 'var(--fg)', duration: 4000 }), 1500);
   if (p.has('volume')) setTimeout(() => island.pushTransient({ kind: 'volume', level: 0.62, waves: 2, duration: 3000 }), 1500);
+  if (p.has('claude')) {
+    // sesiuni Claude Code simulate: lucrează → te așteaptă → lucrează → a terminat → două sesiuni
+    const sess = (id, project, state) => ({ id, project, state, hwnd: 1, since: Date.now() });
+    const send = (ms, list) => setTimeout(() => window.dispatchEvent(new CustomEvent('claude-demo', { detail: list })), ms);
+    send(1200, [sess('a', 'insula', 'working')]);
+    send(6000, [sess('a', 'insula', 'waiting')]);
+    send(14000, [sess('a', 'insula', 'working')]);
+    send(18000, [sess('a', 'insula', 'done')]);
+    send(19000, []);
+    send(22000, [sess('a', 'insula', 'working'), sess('b', 'api', 'working')]);
+  }
   if (p.has('notif')) setTimeout(() => island.pushTransient({ kind: 'notification', app: 'Discord', title: 'Andrei', body: 'Intri pe server diseară?', duration: 5000 }), 1500);
 }
 async function demoInvoke(cmd, args) {

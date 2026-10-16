@@ -286,14 +286,21 @@ fn session_id(s: &Session) -> String {
     s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
 }
 
+fn is_playing(s: &Session) -> bool {
+    s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).map(|st| st == Status::Playing).unwrap_or(false)
+}
+
+/// Sesiunile Windows și, pentru fiecare, dacă rulează.
+fn sessions(m: &Manager) -> (Vec<Session>, Vec<bool>) {
+    let list: Vec<Session> = m.GetSessions().map(|v| v.into_iter().collect()).unwrap_or_default();
+    let playing = list.iter().map(is_playing).collect();
+    (list, playing)
+}
+
 /// Sesiunea de afișat + mulțimea surselor care rulează acum (pentru următoarea alegere).
 fn pick_session(m: &Manager, prev_playing: &HashSet<String>, displayed: Option<&str>) -> (Option<Session>, HashSet<String>) {
-    let list: Vec<Session> = m.GetSessions().map(|v| v.into_iter().collect()).unwrap_or_default();
+    let (list, playing) = sessions(m);
     let ids: Vec<String> = list.iter().map(session_id).collect();
-    let playing: Vec<bool> = list
-        .iter()
-        .map(|s| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).map(|st| st == Status::Playing).unwrap_or(false))
-        .collect();
     let current_id = m.GetCurrentSession().map(|s| session_id(&s)).ok();
     let current = current_id.and_then(|id| ids.iter().position(|x| *x == id));
     let now_playing = ids.iter().zip(&playing).filter(|(_, p)| **p).map(|(id, _)| id.clone()).collect();
@@ -312,12 +319,8 @@ pub fn command_session_index(ids: &[String], playing: &[bool], displayed: Option
 }
 
 fn command_session(m: &Manager, displayed: Option<&str>) -> Option<Session> {
-    let list: Vec<Session> = m.GetSessions().map(|v| v.into_iter().collect()).unwrap_or_default();
+    let (list, playing) = sessions(m);
     let ids: Vec<String> = list.iter().map(session_id).collect();
-    let playing: Vec<bool> = list
-        .iter()
-        .map(|s| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).map(|st| st == Status::Playing).unwrap_or(false))
-        .collect();
     let current = m.GetCurrentSession().ok().map(|s| session_id(&s)).and_then(|id| ids.iter().position(|x| *x == id));
     command_session_index(&ids, &playing, displayed, current).and_then(|i| list.get(i).cloned())
 }
@@ -508,12 +511,9 @@ pub async fn media_control(action: String, state: tauri::State<'_, LastMedia>) -
     result
 }
 
-/// Mesajul când nu există nicio sesiune media (timerul de somn îl tratează ca „nimic de oprit”).
-pub const NO_SESSION: &str = "nicio sesiune media";
-
 fn run_action(action: MediaAction, displayed: Option<&str>) -> Result<(), String> {
     let m = request_manager().map_err(|e| e.to_string())?;
-    let s = command_session(&m, displayed).ok_or(NO_SESSION)?;
+    let s = command_session(&m, displayed).ok_or("nicio sesiune media")?;
     let op = match action {
         MediaAction::PlayPause => s.TryTogglePlayPauseAsync(),
         MediaAction::Pause => s.TryPauseAsync(),
@@ -523,10 +523,36 @@ fn run_action(action: MediaAction, displayed: Option<&str>) -> Result<(), String
     control_outcome(op.and_then(await_op))
 }
 
-/// Pune pe pauză (TryPauseAsync) sesiunea afișată în insulă; blochează thread-ul curent (cel mult câteva secunde),
-/// deci se apelează din thread-ul timerului, nu din cel UI.
-pub fn pause_displayed(store: &LastMedia) -> Result<(), String> {
-    let r = run_action(MediaAction::Pause, store.get().map(|m| m.aumid).as_deref());
+/// Timerul de somn oprește sesiunea care cântă, de preferat cea afișată; None = nimic de oprit.
+pub fn sleep_pause_index(ids: &[String], playing: &[bool], displayed: Option<&str>) -> Option<usize> {
+    displayed
+        .and_then(|d| ids.iter().position(|id| id == d))
+        .filter(|&i| playing[i])
+        .or_else(|| playing.iter().position(|p| *p))
+}
+
+/// Pauza refuzată sau eșuată pe o sesiune care nu mai cântă tot e reușită: muzica e oprită.
+pub fn pause_outcome(r: windows::core::Result<bool>, still_playing: bool) -> Result<(), String> {
+    control_outcome(r).or_else(|e| if still_playing { Err(e) } else { Ok(()) })
+}
+
+/// Nimic nu cântă acum. Fără GSMTC nu știm: false (fade-ul merge ca înainte).
+pub fn nothing_playing() -> bool {
+    request_manager().map(|m| !sessions(&m).1.contains(&true)).unwrap_or(false)
+}
+
+/// Pune pe pauză (TryPauseAsync) sesiunea care cântă (de preferat cea afișată); dacă nu cântă nimic, nimic de oprit.
+/// Blochează thread-ul curent (cel mult câteva secunde), deci se apelează din thread-ul timerului, nu din cel UI.
+pub fn pause_playing(store: &LastMedia) -> Result<(), String> {
+    let displayed = store.get().map(|m| m.aumid);
+    let r = request_manager().map_err(|e| e.to_string()).and_then(|m| {
+        let (list, playing) = sessions(&m);
+        let ids: Vec<String> = list.iter().map(session_id).collect();
+        match sleep_pause_index(&ids, &playing, displayed.as_deref()) {
+            None => Ok(()),
+            Some(i) => pause_outcome(list[i].TryPauseAsync().and_then(await_op), is_playing(&list[i])),
+        }
+    });
     store.request_resync();
     r
 }
@@ -617,6 +643,23 @@ mod tests {
         assert_eq!(command_session_index(&s, &[false, true], Some("vlc"), Some(0)), Some(1));
         assert_eq!(command_session_index(&s, &[false, false], None, Some(0)), Some(0));
         assert_eq!(command_session_index(&[], &[], Some("chrome"), None), None);
+    }
+
+    #[test]
+    fn somnul_opreste_sesiunea_care_canta() {
+        let s = ids(&["spotify", "chrome"]);
+        assert_eq!(sleep_pause_index(&s, &[true, true], Some("chrome")), Some(1)); // cea afișată cântă
+        assert_eq!(sleep_pause_index(&s, &[true, false], Some("chrome")), Some(0)); // afișata e pe pauză, cântă alta
+        assert_eq!(sleep_pause_index(&s, &[false, false], Some("chrome")), None); // nimic nu cântă
+        assert_eq!(sleep_pause_index(&[], &[], None), None); // nicio sesiune
+    }
+
+    #[test]
+    fn pauza_pe_o_sesiune_deja_oprita_e_reusita() {
+        assert_eq!(pause_outcome(Ok(true), true), Ok(())); // cânta, s-a oprit
+        assert_eq!(pause_outcome(Ok(false), false), Ok(())); // refuzată, dar sesiunea e deja pe pauză
+        assert!(pause_outcome(Ok(false), true).is_err()); // refuzată și cântă încă
+        assert!(pause_outcome(Err(E_FAIL.into()), true).is_err());
     }
 
     #[test]

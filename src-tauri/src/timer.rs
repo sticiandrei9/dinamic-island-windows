@@ -67,14 +67,6 @@ pub fn user_changed(expected: f32, actual: f32) -> bool {
     (expected - actual).abs() > USER_CHANGE
 }
 
-/// După pauză volumul revine și când nu e nicio sesiune media (nimic de oprit); la altă eroare rămâne 0.
-pub fn restore_after_pause(r: &Result<(), String>) -> bool {
-    match r {
-        Ok(()) => true,
-        Err(e) => e == crate::media::NO_SESSION,
-    }
-}
-
 /// Un singur ceas pentru toată aplicația (toate insulele îl afișează la fel).
 #[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct Clock {
@@ -256,7 +248,9 @@ static ACTIVE: Mutex<Option<Active>> = Mutex::new(None);
 
 /// Volumul de dinainte revine pe difuzorul fade-ului (o singură dată: starea se golește).
 fn restore_volume() {
-    if let Some(a) = ACTIVE.lock().unwrap().take() {
+    // scos din mutex înainte de apelul COM: un driver blocat nu ține pe loc thread-ul timerului și ieșirea
+    let a = ACTIVE.lock().unwrap().take();
+    if let Some(a) = a {
         crate::volume::suppress_transient(Instant::now() + Duration::from_secs(1));
         let _ = crate::volume::set_master_volume(&a.ep, a.start);
     }
@@ -283,17 +277,20 @@ fn drop_sleep(app: &AppHandle) {
 /// Pauza și volumul la final de somn, pe un thread separat (pauza poate dura câteva secunde).
 fn finish_sleep(app: AppHandle) {
     std::thread::spawn(move || {
-        let r = crate::media::pause_displayed(&app.state::<crate::media::LastMedia>());
-        if restore_after_pause(&r) {
-            restore_volume();
-            let _ = app.emit("sleep-done", ());
-        } else {
-            abandon_volume(); // volumul rămâne 0, ca utilizatorul să vadă că ceva n-a mers
-            log::warn!("timer de somn: pauza a eșuat: {}", r.unwrap_err());
-            let _ = app.emit(
-                "alert",
-                serde_json::json!({ "icon": "bell", "title": crate::i18n::t("sleep.pauseFailed"), "detail": "", "color": "var(--red)", "level": null }),
-            );
+        // nimic nu mai cântă sau pauza a reușit: volumul revine; la altă eroare rămâne 0
+        match crate::media::pause_playing(&app.state::<crate::media::LastMedia>()) {
+            Ok(()) => {
+                restore_volume();
+                let _ = app.emit("sleep-done", ());
+            }
+            Err(e) => {
+                abandon_volume(); // volumul rămâne 0, ca utilizatorul să vadă că ceva n-a mers
+                log::warn!("timer de somn: pauza a eșuat: {e}");
+                let _ = app.emit(
+                    "alert",
+                    serde_json::json!({ "icon": "bell", "title": crate::i18n::t("sleep.pauseFailed"), "detail": "", "color": "var(--red)", "level": null }),
+                );
+            }
         }
     });
 }
@@ -316,6 +313,11 @@ fn sleep_tick(app: &AppHandle, fade: &mut Option<Fade>, now: u64) {
         return; // încă înainte de ultimele 10 s
     }
     if fade.is_none() {
+        // nu cântă nimic: somnul se încheie liniștit, fără fade, fără pauză, volumul neatins
+        if crate::media::nothing_playing() {
+            drop_sleep(app);
+            return;
+        }
         // fără difuzor: nu e nimic de scăzut, la final doar pauza
         let ep = crate::volume::default_endpoint_volume().ok();
         let start = ep.as_ref().and_then(crate::volume::master_volume);
@@ -531,13 +533,6 @@ mod tests {
         assert_eq!(c.sleep.as_ref().unwrap().ends_at, 1_800_000);
         c.sleep_cancel();
         assert!(c.sleep.is_none());
-    }
-
-    #[test]
-    fn fara_media_volum_restaurat() {
-        assert!(restore_after_pause(&Ok(())));
-        assert!(restore_after_pause(&Err("nicio sesiune media".into())));
-        assert!(!restore_after_pause(&Err("timeout".into())));
     }
 
     #[test]

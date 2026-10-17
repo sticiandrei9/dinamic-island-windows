@@ -97,9 +97,13 @@ fn set_dark(on: bool) -> Result<(), String> {
 // + n octeți (structura interioară), `00 00 00`. Structura interioară: `43 42 01 00`, câmpuri, `00`.
 // Câmpuri: 0 int32 (prezent = pornită, valoarea 0), 10 int32 cauza (1 = manual, zigzag `02`),
 // 20 uint64 FILETIME-ul ultimei schimbări, 30 bool „folosibilă” (lipsă = da).
+// Cheia per-dispozitiv (`{guid}$…perdevice`, build 26300) are în plus un `01` (BT_STOP_BASE: o structură
+// de bază goală) chiar înainte de stopul final.
 // Orice altceva (alt antet, alt tip, alt câmp) → `None`: butonul lipsește, nu scriem ce nu înțelegem.
 
-const NIGHT: &str = r"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Current\default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
+const STORE: &str = r"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Current";
+const NIGHT: &str = r"default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
+const NIGHT_PER_DEVICE: &str = "windows.data.bluelightreduction.bluelightreductionstateperdevice";
 const CB: [u8; 4] = [0x43, 0x42, 0x01, 0x00];
 const OUTER_HEAD: [u8; 10] = [0x43, 0x42, 0x01, 0x00, 0x0a, 0x02, 0x01, 0x00, 0x2a, 0x06];
 const LIST_HEAD: [u8; 3] = [0x2a, 0x2b, 0x0e];
@@ -154,8 +158,11 @@ fn wrap_cloudstore(ts: u64, inner: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Câmpurile structurii interioare `(id, tip, valoare)`, validate față de forma cunoscută.
-fn night_fields(inner: &[u8]) -> Option<Vec<(u8, u8, Vec<u8>)>> {
+type Fields = Vec<(u8, u8, Vec<u8>)>;
+
+/// Câmpurile structurii interioare `(id, tip, valoare)`, validate față de forma cunoscută,
+/// și dacă are `01` înainte de stop (cheia per-dispozitiv).
+fn night_fields(inner: &[u8]) -> Option<(Fields, bool)> {
     if inner.get(..4)? != CB {
         return None;
     }
@@ -163,8 +170,10 @@ fn night_fields(inner: &[u8]) -> Option<Vec<(u8, u8, Vec<u8>)>> {
     loop {
         let h = *inner.get(i)?;
         i += 1;
-        if h == 0 {
-            return (i == inner.len()).then_some(out); // stop: trebuie să fie ultimul octet
+        if h == 0 || (h == 1 && inner.get(i) == Some(&0)) {
+            // stop (eventual după `01`): trebuie să fie ultimul octet
+            let base = h == 1;
+            return (i + usize::from(base) == inner.len()).then_some((out, base));
         }
         let (ty, id) = (h & 0x1f, match h >> 5 {
             6 => {
@@ -183,7 +192,8 @@ fn night_fields(inner: &[u8]) -> Option<Vec<(u8, u8, Vec<u8>)>> {
         let v = inner.get(start..i)?.to_vec();
         let known = match (id, ty) {
             (0, BT_INT32) => v == [0],
-            (10, BT_INT32) | (20, BT_UINT64) => true,
+            (10, BT_INT32) => v == [0] || v == [2], // 0 = program, 1 = manual (zigzag)
+            (20, BT_UINT64) => true,
             (30, BT_BOOL) => v == [1],
             _ => false,
         };
@@ -197,7 +207,13 @@ fn night_fields(inner: &[u8]) -> Option<Vec<(u8, u8, Vec<u8>)>> {
 /// `Some(true)` = pornită; `None` = format necunoscut sau nefolosibilă pe acest dispozitiv.
 pub fn night_light_state(blob: &[u8]) -> Option<bool> {
     let (_, inner) = unwrap_cloudstore(blob)?;
-    Some(night_fields(inner)?.iter().any(|(id, _, _)| *id == 0))
+    Some(night_fields(inner)?.0.iter().any(|(id, _, _)| *id == 0))
+}
+
+/// Starea din `default$` dacă fiecare cheie per-dispozitiv e recunoscută și spune același lucru.
+fn night_combined(default: &[u8], per_device: &[Vec<u8>]) -> Option<bool> {
+    let on = night_light_state(default)?;
+    per_device.iter().all(|b| night_light_state(b) == Some(on)).then_some(on)
 }
 
 /// Blob-ul nou cu starea cerută, marcat ca schimbare manuală acum; `None` dacă formatul nu e recunoscut.
@@ -210,7 +226,7 @@ pub fn night_light_set(blob: &[u8], on: bool) -> Option<Vec<u8>> {
 
 fn night_light_set_at(blob: &[u8], on: bool, unix: u64, filetime: u64) -> Option<Vec<u8>> {
     let (_, inner) = unwrap_cloudstore(blob)?;
-    let mut fields = night_fields(inner)?;
+    let (mut fields, base) = night_fields(inner)?;
     fields.retain(|(id, _, _)| ![0, 10, 20].contains(id));
     if on {
         fields.push((0, BT_INT32, vec![0]));
@@ -229,29 +245,52 @@ fn night_light_set_at(blob: &[u8], on: bool, unix: u64, filetime: u64) -> Option
         }
         out.extend(v);
     }
+    if base {
+        out.push(1);
+    }
     out.push(0);
     Some(wrap_cloudstore(unix, &out))
 }
 
-fn night_blob() -> Option<Vec<u8>> {
-    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(NIGHT, KEY_READ).ok()?;
+/// Căile (relative la `STORE`) ale cheii `default$` și ale cheilor per-dispozitiv (GUID-ul diferă de la PC la PC).
+fn night_paths() -> Option<Vec<String>> {
+    let store = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(STORE, KEY_READ).ok()?;
+    let suffix = format!("${NIGHT_PER_DEVICE}");
+    let per_device = store.enum_keys().filter_map(Result::ok).filter(|k| k.ends_with(&suffix));
+    Some(std::iter::once(NIGHT.to_string()).chain(per_device.map(|k| format!(r"{k}\{NIGHT_PER_DEVICE}"))).collect())
+}
+
+fn night_blob(path: &str) -> Option<Vec<u8>> {
+    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(format!(r"{STORE}\{path}"), KEY_READ).ok()?;
     let v = key.get_raw_value("Data").ok()?;
     (v.vtype == REG_BINARY).then_some(v.bytes)
 }
 
-fn night_on() -> Option<bool> {
-    night_light_state(&night_blob()?)
+/// Blob-urile în ordinea din `night_paths`; o cheie per-dispozitiv fără `Data` binar → `None` (nu ghicim).
+fn night_blobs(paths: &[String]) -> Option<Vec<Vec<u8>>> {
+    paths.iter().map(|p| night_blob(p)).collect()
 }
 
-/// Doar blob-ul: Windows urmărește cheia și aplică singur schimbarea.
+fn night_on() -> Option<bool> {
+    let blobs = night_blobs(&night_paths()?)?;
+    night_combined(&blobs[0], &blobs[1..])
+}
+
+/// Doar blob-urile (toate sau niciunul): Windows urmărește cheile și aplică singur schimbarea.
 fn set_night(on: bool) -> Result<(), String> {
-    let blob = night_blob().ok_or("lumina de noapte indisponibilă")?;
-    if night_light_state(&blob) == Some(on) {
-        return Ok(());
+    let paths = night_paths().ok_or("lumina de noapte indisponibilă")?;
+    let blobs = night_blobs(&paths).ok_or("lumina de noapte indisponibilă")?;
+    match night_combined(&blobs[0], &blobs[1..]) {
+        Some(now) if now == on => return Ok(()),
+        Some(_) => {}
+        None => return Err("format necunoscut al luminii de noapte".into()),
     }
-    let bytes = night_light_set(&blob, on).ok_or("format necunoscut al luminii de noapte")?;
-    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(NIGHT, KEY_SET_VALUE).map_err(|e| e.to_string())?;
-    key.set_raw_value("Data", &RegValue { bytes, vtype: REG_BINARY }).map_err(|e| e.to_string())
+    let new: Vec<Vec<u8>> = blobs.iter().map(|b| night_light_set(b, on)).collect::<Option<_>>().ok_or("format necunoscut al luminii de noapte")?;
+    for (path, bytes) in paths.iter().zip(new) {
+        let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(format!(r"{STORE}\{path}"), KEY_SET_VALUE).map_err(|e| e.to_string())?;
+        key.set_raw_value("Data", &RegValue { bytes, vtype: REG_BINARY }).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 // ---------- Nu deranja (QuietHoursSettings, COM nedocumentat) ----------
@@ -265,7 +304,9 @@ const QH_OFF: &str = "Microsoft.QuietHoursProfile.Unrestricted";
 const QH_ON: &str = "Microsoft.QuietHoursProfile.PriorityOnly";
 const CLSID_QUIET_HOURS: GUID = GUID::from_u128(0xf53321fa_34f8_4b7f_b9a3_361877cb94cf);
 
-// doar primele două metode; ordinea lor în tabelul virtual e cea din IDL
+// doar primele două metode; ordinea lor în tabelul virtual e cea din IDL.
+// `UserSelectedProfile` = comutatorul manual din Setări; `ActiveProfile` include regulile automate
+// (joc, ecran complet, program), pe care butonul nu le arată și nu le poate opri.
 #[interface("6bff4732-81ec-4ffb-ae67-b6c1bc29631f")]
 unsafe trait IQuietHoursSettings: IUnknown {
     fn user_selected_profile(&self, profile: *mut PWSTR) -> HRESULT;
@@ -391,6 +432,34 @@ mod tests {
         0x00, 0x00, 0x00,
     ];
 
+    /// REAL: cheia `{5771beed…}$…bluelightreductionstateperdevice` de pe PC-ul lui Andrei (2026-10-17):
+    /// același conținut + `01` (sfârșitul structurii de bază, goală) înainte de stopul final.
+    const PERDEVICE_REAL: &[u8] = &[
+        0x43, 0x42, 0x01, 0x00, 0x0a, 0x02, 0x01, 0x00, 0x2a, 0x06, 0x95, 0xf1, 0x92, 0xd4, 0x06, 0x2a, 0x2b, 0x0e, 0x16,
+        0x43, 0x42, 0x01, 0x00, 0x10, 0x00, 0xd0, 0x0a, 0x02, 0xc6, 0x14, 0xd8, 0x87, 0xe3, 0xb1, 0xc7, 0xb6, 0xcb, 0xee, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+
+    #[test]
+    fn cheia_per_dispozitiv() {
+        assert_eq!(night_light_state(PERDEVICE_REAL), Some(true));
+        let (mut a, mut b) = (10, 30);
+        let (ts, ft) = (varint(PERDEVICE_REAL, &mut a).unwrap(), varint(PERDEVICE_REAL, &mut b).unwrap());
+        let off = night_light_set_at(PERDEVICE_REAL, false, ts, ft).unwrap();
+        assert_eq!(night_light_state(&off), Some(false));
+        let (_, inner) = unwrap_cloudstore(&off).unwrap();
+        assert_eq!(inner[inner.len() - 2..], [0x01, 0x00]); // `01` păstrat
+        assert_eq!(night_light_set_at(&off, true, ts, ft).unwrap(), PERDEVICE_REAL);
+    }
+
+    #[test]
+    fn cele_doua_chei_trebuie_sa_fie_de_acord() {
+        assert_eq!(night_combined(REAL_ON, &[PERDEVICE_REAL.to_vec()]), Some(true));
+        assert_eq!(night_combined(OFF_SAMPLE, &[]), Some(false));
+        assert_eq!(night_combined(OFF_SAMPLE, &[PERDEVICE_REAL.to_vec()]), None);
+        assert_eq!(night_combined(REAL_ON, &[vec![1, 2, 3]]), None);
+    }
+
     /// (secunde Unix din antet, FILETIME din câmpul 20) ale mostrei reale.
     fn real_times() -> (u64, u64) {
         let (mut a, mut b) = (10, 30);
@@ -454,6 +523,15 @@ mod tests {
         bad(&|b| b[25] = 0xc9); // tip necunoscut (string) la câmpul 10
         bad(&|b| b[26] = 0x05); // câmp necunoscut (id 5)
         bad(&|b| b[4] = 0x0b); // antet exterior diferit
+        bad(&|b| b[27] = 0x04); // cauză necunoscută (2)
+        bad(&|b| {
+            b.insert(23, 0x01); // `01` care nu e chiar înainte de stop
+            b[18] = 0x16;
+        });
+        bad(&|b| {
+            b.splice(39..39, [0x01, 0x01]); // două `01`
+            b[18] = 0x17;
+        });
         // „nefolosibilă pe acest dispozitiv” (câmpul 30 = false) → butonul lipsește
         bad(&|b| {
             b.splice(39..39, [0xc2, 0x1e, 0x00]);

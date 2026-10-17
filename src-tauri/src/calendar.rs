@@ -74,15 +74,24 @@ pub fn safe_link(url: &str) -> bool {
     url.starts_with("https://") && !url.chars().any(|c| c == '"' || c.is_whitespace() || c.is_control())
 }
 
-/// Deschide evenimentul în Google Calendar sau linkul întâlnirii, în browserul implicit.
-#[tauri::command]
-pub fn calendar_open(url: String) -> Result<(), String> {
+/// Deschide un link https în browserul implicit (evenimentul din Google Calendar, întâlnirea, rularea CI).
+fn open_https(url: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    if !safe_link(&url) {
+    if !safe_link(url) {
         return Err("link refuzat".into());
     }
     crate::platform::allow_foreground();
     std::process::Command::new("explorer").raw_arg(format!("\"{url}\"")).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn calendar_open(url: String) -> Result<(), String> {
+    open_https(&url)
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    open_https(&url)
 }
 
 #[cfg(test)]

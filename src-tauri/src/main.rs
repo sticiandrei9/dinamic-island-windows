@@ -2,6 +2,7 @@
 
 mod alerts;
 mod calendar;
+mod ci;
 mod claude;
 mod claude_hook;
 mod clipboard;
@@ -97,6 +98,8 @@ fn main() {
             output::audio_set_output,
             calendar::calendar_fetch,
             calendar::calendar_open,
+            calendar::open_url,
+            ci::ci_status,
             claude::claude_sessions,
             claude::claude_focus,
             claude::claude_icon,
@@ -158,6 +161,7 @@ fn main() {
             displays::spawn_watcher(app.handle().clone());
             hittest::spawn(app.handle().clone());
             claude::spawn(app.handle().clone());
+            ci::spawn(app.handle().clone());
             downloads::spawn(app.handle().clone());
             unlock::spawn(app.handle().clone());
             system::spawn(app.handle().clone());

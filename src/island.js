@@ -226,7 +226,7 @@ function tickTransient() {
 
 function renderTransient(t) {
   transientEl.dataset.kind = t.kind;
-  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb' || t.kind === 'claude' || t.kind === 'clip') {
+  if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb' || t.kind === 'claude' || t.kind === 'clip' || t.kind === 'ci') {
     transientEl.style.setProperty('--t-color', t.color ?? 'var(--fg)');
     // `img` (data URL) înlocuiește pictograma, de ex. iconița aplicației Claude
     if (t.img) $('t-icon').replaceChildren(Object.assign(new Image(), { src: t.img, alt: '', draggable: false }));
@@ -522,6 +522,19 @@ function startDemo() {
     for (let s = 0; s < 6; s++) at(1200 + s * 1000, 'downloads-demo', [{ id: file, name: file, bytes: 20_000_000 + s * 4_200_000, speed: 4_200_000 }]);
     at(7200, 'downloads-demo', []);
     at(7200, 'download-done-demo', { name: file, path: `C:\\Users\\Andrei\\Downloads\\${file}`, bytes: 45_000_000 });
+  }
+  if (p.has('ci')) {
+    // o rulare în curs, apoi una verde și una roșie (ci-view.js); ?ci=1 doar rularea
+    const at = (ms, ev, detail) => setTimeout(() => window.dispatchEvent(new CustomEvent(ev, { detail })), ms);
+    const run = (id, name, state) => ({ id, source: 'github', project: 'dinamic-island-windows', name, state, url: `https://github.com/sticiandrei9/dinamic-island-windows/actions/runs/${id}`, finished_at: null });
+    at(1200, 'ci-demo', [run('1', 'Teste', 'running')]);
+    at(5000, 'ci-demo', [run('1', 'Teste', 'running'), run('2', 'Build', 'running')]);
+    if (p.get('ci') !== '1') {
+      at(8000, 'ci-demo', [run('2', 'Build', 'running')]);
+      at(8000, 'ci-done-demo', run('1', 'Teste', 'ok'));
+      at(14500, 'ci-demo', []);
+      at(14500, 'ci-done-demo', run('2', 'Build', 'failed'));
+    }
   }
   if (p.has('system')) setTimeout(() => island.expandTo('system'), 1200); // fila Sistem cu valori inventate (system-view.js)
   if (p.has('clipboard')) {

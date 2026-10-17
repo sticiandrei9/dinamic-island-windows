@@ -45,6 +45,7 @@ img { -webkit-user-drag: none; user-select: none; }
 #compact[data-kind="claude"] .c-claude,
 #compact[data-kind="claude-waiting"] .c-claude,
 #compact[data-kind="download"] .c-download,
+#compact[data-kind="ci"] .c-ci,
 #compact[data-kind="sleep"] .c-sleep { display: flex; }
 #compact .art { width: 20px; height: 20px; border-radius: 5px; object-fit: cover; }
 #compact[data-kind=""] .dots { margin-left: auto; }
@@ -120,13 +121,15 @@ body.transient #transient {
 #transient[data-kind="kb"] .t-alert,
 #transient[data-kind="claude"] .t-alert,
 #transient[data-kind="clip"] .t-alert,
+#transient[data-kind="ci"] .t-alert,
 #transient[data-kind="volume"] .t-volume,
 #transient[data-kind="notification"] .t-notif,
 #transient[data-kind="screenshot"] .t-shot,
 #transient[data-kind="download"] .t-download,
 #transient[data-kind="unlock"] .t-unlock { display: flex; }
 body.transient #transient[data-kind="screenshot"], body.transient #transient[data-kind="claude"], body.transient #transient[data-kind="download"] { pointer-events: auto; }
-body.transient #transient[data-kind="claude"] { cursor: pointer; }
+body.transient #transient[data-kind="claude"], body.transient #transient[data-kind="ci"] { cursor: pointer; }
+body.transient #transient[data-kind="ci"] { pointer-events: auto; }
 .t-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--t-color, var(--fg)); }
 .t-icon svg { width: 21px; height: 21px; }
 .t-icon img { width: 21px; height: 21px; border-radius: 5px; }
@@ -163,7 +166,10 @@ body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .d-ring .bg { stroke: rgba(255, 255, 255, .18); }
 .d-ring .fg { stroke: var(--green); stroke-linecap: round; stroke-dasharray: 14 43; }
 @keyframes d-spin { to { transform: rotate(360deg); } }
-#bubble[data-kind="download"] #b-download { display: block; width: 22px; height: 22px; }
+#bubble[data-kind="download"] #b-download, #bubble[data-kind="ci"] #b-download { display: block; width: 22px; height: 22px; }
+/* CI: același inel, cu „proiect · workflow” */
+#compact .c-ci { gap: 8px; justify-content: flex-start; animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }
+.c-ci-text { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .c-download b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .c-download span { flex: none; margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--fg2); white-space: nowrap; }
 .t-download { gap: 10px; padding: 0 12px 0 14px; animation: claude-in .4s cubic-bezier(.2, 1.2, .4, 1); }

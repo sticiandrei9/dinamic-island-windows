@@ -37,6 +37,7 @@ function renderModules() {
     row.append(label, sw);
     box.append(row);
     if (key === 'claude') box.append(claudeStatusRow());
+    if (key === 'ci') box.append(ciStatusRow());
   }
 }
 
@@ -62,6 +63,26 @@ function claudeStatusRow() {
   };
   btn.addEventListener('click', async () => { await invoke('claude_hook_install').catch(() => {}); fill(); });
   fill();
+  return row;
+}
+
+// starea `gh` sub comutatorul CI: autentificat ca … / lipsește / neautentificat / eroare / pauză din cauza plafonului
+function ciStatusRow() {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.hidden = !settings.modules.ci;
+  const label = document.createElement('div');
+  label.className = 'label';
+  const small = document.createElement('small');
+  label.append(small);
+  row.append(label);
+  if (settings.modules.ci) {
+    invoke('ci_status').then((st) => {
+      const paused = st.gh === 'ok' && st.budget_paused;
+      small.className = st.gh === 'ok' && !paused ? '' : 'error';
+      small.textContent = paused ? t('settings.ciBudget') : st.gh === 'ok' ? t('settings.ciOk', { user: st.user }) : t(`settings.ci${st.gh[0].toUpperCase()}${st.gh.slice(1)}`);
+    }).catch(() => { small.className = 'error'; small.textContent = t('settings.ciError'); });
+  }
   return row;
 }
 

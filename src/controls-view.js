@@ -15,6 +15,9 @@ export function init(island) {
   let state = null;
   let built = ''; // lista de butoane desenată; rândul se reface doar când se schimbă (altfel intrarea ar reporni la 2 s)
   let armedAt = 0;
+  let polling = false; // o singură citire odată: sondajele nu se îngrămădesc
+  let pending = 0; // comenzi `controls_set` în zbor: cât durează, sondajele se sar, iar click-urile se ignoră
+  let rev = 0; // crește la fiecare comandă; o citire pornită înainte de ea e veche și se aruncă
   let disarm = 0;
   const buttons = new Map();
   const log = (msg) => tauri && invoke('log_js', { msg: `centru de control: ${msg}` }).catch(() => {});
@@ -24,7 +27,7 @@ export function init(island) {
     const on = field ? state?.[field] === true : false;
     b.classList.toggle('on', on);
     b.classList.toggle('armed', name === 'sleep' && armedAt > 0);
-    b.setAttribute('aria-pressed', field ? String(on) : 'false');
+    b.setAttribute('aria-pressed', String(field ? on : name === 'sleep' && armedAt > 0));
     b.innerHTML = name === 'wifi' && !on ? ICONS.wifiOff : name === 'mic' && on ? ICONS.micOff : ICONS[ICON[name]];
     const label = name === 'sleep' && armedAt > 0 ? t('controls.sleepConfirm') : t(`controls.${name}`);
     b.title = label;
@@ -52,9 +55,12 @@ export function init(island) {
   }
 
   async function refresh() {
-    if (!enabled || demo) return;
-    state = await invoke('controls_state').catch(() => state);
-    render();
+    if (!enabled || demo || polling || pending) return;
+    polling = true;
+    const seen = rev;
+    const next = await invoke('controls_state').catch(() => null);
+    polling = false;
+    if (next && seen === rev && !pending) { state = next; render(); }
   }
 
   async function click(name) {
@@ -71,10 +77,20 @@ export function init(island) {
       if (!demo) invoke('controls_action', { name }).catch((err) => log(`${name}: ${err}`));
       return;
     }
+    if (pending) return;
     const field = FIELD[name];
     const next = !(state?.[field] === true);
-    if (demo) state = { ...state, [field]: next };
-    else state = await invoke('controls_set', { name, on: next }).catch((err) => { log(`${name}: ${err}`); return state; });
+    if (demo) { state = { ...state, [field]: next }; render(); return; }
+    pending++;
+    rev++;
+    try {
+      state = await invoke('controls_set', { name, on: next });
+    } catch (err) {
+      log(`${name}: ${err}`);
+    } finally {
+      pending--;
+      rev++;
+    }
     render();
   }
 

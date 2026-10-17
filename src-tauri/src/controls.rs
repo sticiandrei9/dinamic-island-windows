@@ -1,6 +1,6 @@
 use crate::media::await_op;
 use serde::Serialize;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Devices::Radios::{Radio, RadioAccessStatus, RadioKind, RadioState};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::System::Com::COINIT_MULTITHREADED;
@@ -13,7 +13,7 @@ use winreg::RegKey;
 const PERSONALIZE: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
 /// `None` = indisponibil pe acest PC → butonul lipsește. `night` și `dnd` vin în Task 4.
-#[derive(Serialize, Clone, Debug, Default)]
+#[derive(Serialize, Clone, Debug)]
 pub struct Controls {
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
@@ -30,23 +30,34 @@ pub fn dark_values(on: bool) -> (u32, u32) {
 
 // ---------- radiouri (Wi-Fi / Bluetooth) ----------
 
-/// Accesul la radiouri se cere o singură dată; fără el `SetStateAsync` întoarce `DeniedByUser`.
-fn radios(kind: RadioKind) -> Vec<Radio> {
-    static ACCESS: OnceLock<bool> = OnceLock::new();
-    ACCESS.get_or_init(|| matches!(Radio::RequestAccessAsync().and_then(await_op), Ok(RadioAccessStatus::Allowed)));
+/// Toate radiourile, dar numai după ce accesul e `Allowed`; altfel gol (butoanele lipsesc, nu eșuează tăcut).
+/// Se reține doar un răspuns `Allowed`, ca un refuz de acum să poată fi reîncercat mai târziu.
+fn radios() -> Vec<Radio> {
+    static ALLOWED: AtomicBool = AtomicBool::new(false);
+    if !ALLOWED.load(Ordering::Relaxed) {
+        if !matches!(Radio::RequestAccessAsync().and_then(await_op), Ok(RadioAccessStatus::Allowed)) {
+            return Vec::new();
+        }
+        ALLOWED.store(true, Ordering::Relaxed);
+    }
     let Ok(all) = Radio::GetRadiosAsync().and_then(await_op) else { return Vec::new() };
-    all.into_iter().filter(|r| r.Kind().ok() == Some(kind)).collect()
+    all.into_iter().collect()
 }
 
-fn radio_on(kind: RadioKind) -> Option<bool> {
-    let rs = radios(kind);
+fn of_kind(all: &[Radio], kind: RadioKind) -> Vec<&Radio> {
+    all.iter().filter(|r| r.Kind().ok() == Some(kind)).collect()
+}
+
+fn radio_on(all: &[Radio], kind: RadioKind) -> Option<bool> {
+    let rs = of_kind(all, kind);
     if rs.is_empty() { None } else { Some(rs.iter().any(|r| r.State().ok() == Some(RadioState::On))) }
 }
 
 fn set_radio(kind: RadioKind, on: bool) -> Result<(), String> {
-    let rs = radios(kind);
+    let all = radios();
+    let rs = of_kind(&all, kind);
     if rs.is_empty() {
-        return Err("nu există radio".into());
+        return Err("nu există radio sau accesul e refuzat".into());
     }
     let state = if on { RadioState::On } else { RadioState::Off };
     for r in rs {
@@ -82,9 +93,10 @@ fn set_dark(on: bool) -> Result<(), String> {
 
 fn read_state() -> Controls {
     let _com = crate::platform::ComGuard::new(COINIT_MULTITHREADED);
+    let all = radios(); // o singură enumerare pentru Wi-Fi și Bluetooth
     Controls {
-        wifi: radio_on(RadioKind::WiFi),
-        bluetooth: radio_on(RadioKind::Bluetooth),
+        wifi: radio_on(&all, RadioKind::WiFi),
+        bluetooth: radio_on(&all, RadioKind::Bluetooth),
         dark: dark_on(),
         night: None,
         dnd: None,
@@ -93,8 +105,9 @@ fn read_state() -> Controls {
 }
 
 #[tauri::command]
-pub async fn controls_state() -> Controls {
-    tauri::async_runtime::spawn_blocking(read_state).await.unwrap_or_default()
+pub async fn controls_state() -> Result<Controls, String> {
+    // la eroare de join JS păstrează starea veche (nu un Controls gol, care ar ascunde butoanele)
+    tauri::async_runtime::spawn_blocking(read_state).await.map_err(|e| e.to_string())
 }
 
 /// `on` = starea cerută a câmpului din `Controls` (pentru microfon: `true` = pe mute). Întoarce starea nouă.
@@ -121,8 +134,10 @@ pub async fn controls_action(name: String) -> Result<(), String> {
         "lock" => unsafe { LockWorkStation() }.map_err(|e| e.to_string()),
         // SetSuspendState se întoarce abia la trezire: pe firul lui, ca să nu blocăm comanda
         "sleep" => {
-            std::thread::spawn(|| unsafe {
-                SetSuspendState(false, false, false);
+            std::thread::spawn(|| {
+                if !unsafe { SetSuspendState(false, false, false) }.as_bool() {
+                    log::warn!("SetSuspendState a eșuat (sleep neexecutat)");
+                }
             });
             Ok(())
         }

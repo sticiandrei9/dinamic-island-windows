@@ -17,3 +17,9 @@ test('sleep cere al doilea click în 3 s', () => {
   s = sleepClick(s.armedAt, 2500); assert.equal(s.fire, true);
   s = sleepClick(1000, 5000); assert.equal(s.fire, false);
 });
+test('sleep: limita de 3000 ms e inclusă, 3001 ms nu', () => {
+  assert.equal(sleepClick(1000, 4000).fire, true);
+  const late = sleepClick(1000, 4001);
+  assert.equal(late.fire, false);
+  assert.equal(late.armedAt, 4001); // rearmează
+});

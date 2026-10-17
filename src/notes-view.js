@@ -91,15 +91,24 @@ export function init(island) {
   }
 
   // ---------- focus ----------
-  const grab = () => invoke('notes_focus', { on: true }).catch(() => {});
+  // activarea mută focusul prin fereastră și WebView2, iar pe drum câmpul primește un `blur` parazit:
+  // cât durează activarea, `blur` nu predă focusul; la final focusul DOM revine explicit pe câmp
+  let activating = false;
+  const grab = () => {
+    activating = true;
+    return invoke('notes_focus', { on: true })
+      .then(() => setTimeout(() => { input.focus(); activating = false; }, 150))
+      .catch(() => { activating = false; });
+  };
   function release() {
+    if (activating) return;
     invoke('notes_focus', { on: false }).catch(() => {});
     // cursorul e în altă parte (scurtătura, sau a ieșit cât se scria și ieșirea n-a strâns): insula nu mai are cine s-o strângă
     clearTimeout(hideTimer);
     if (!island.hovering) hideTimer = setTimeout(() => { if (!island.hovering) island.collapse(); }, 1500);
   }
-  input.addEventListener('focus', grab);
-  // fereastra nu e activă (NOACTIVATE), deci `focus` nu vine la click: activăm la apăsare (al doilea grab e inofensiv)
+  // activăm doar la click și din scurtătură, niciodată la evenimentul `focus`: după ce redăm focusul, WebView2
+  // pune singur focusul DOM înapoi pe câmp, iar un grab pe `focus` ar reactiva insula în buclă
   input.addEventListener('pointerdown', grab);
   input.addEventListener('blur', release);
   input.addEventListener('keydown', (e) => {

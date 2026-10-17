@@ -70,6 +70,8 @@ pub fn activate_for_typing(win: &WebviewWindow) -> Option<isize> {
         if attached {
             let _ = AttachThreadInput(me_tid, fg_tid, false);
         }
+        // fereastra exterioară activă nu ajunge: tastele merg în pagină doar după MoveFocus în WebView2
+        let _ = AsRef::<tauri::Webview>::as_ref(win).set_focus();
         prev
     }
 }

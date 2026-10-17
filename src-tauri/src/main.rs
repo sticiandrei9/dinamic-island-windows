@@ -106,6 +106,7 @@ fn main() {
             privacy::set_mirror_active,
             privacy::privacy_current,
             mic::mic_set_mute,
+            alerts::batteries_list,
             controls::controls_state,
             controls::controls_set,
             controls::controls_action,

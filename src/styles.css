@@ -292,7 +292,26 @@ body.no-apps .apps { display: none; }
 
 #x-clock { display: none; align-items: center; justify-content: center; text-align: center; padding-top: 2px; }
 body:not(.has-media) #x-clock { display: flex; }
-#x-batteries:empty { display: none; }
+#x-clock:has(#x-batteries:not(:empty)) { justify-content: space-between; text-align: left; gap: 10px; }
+#x-clock:has(#x-batteries:not(:empty)) .clock-main { flex: none; }
+#x-clock:has(#x-batteries:not(:empty)) .clock-date { white-space: nowrap; }
+.batteries { display: flex; align-items: center; gap: 4px 8px; }
+#x-batteries { flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.batteries:empty { display: none; }
+.bat { display: flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; animation: ctl-in .4s cubic-bezier(.2, 1.2, .4, 1) backwards; }
+.bat-icon svg { width: 14px; height: 14px; display: block; }
+.bat-ring { width: 13px; height: 13px; }
+.bat-ring circle { fill: none; stroke-width: 3; }
+.bat-bg { stroke: rgba(255, 255, 255, .18); }
+.bat-fg { stroke: var(--green); stroke-linecap: round; }
+.bat.low { color: var(--red); }
+.bat.low .bat-fg { stroke: var(--red); }
+.bat-more { font-size: 12px; font-weight: 600; color: var(--fg2); }
+/* locul batteriilor: în rândul ceasului fără media, la capătul rândului cu butoane cu media */
+#x-batteries-m { display: none; }
+body.has-media #x-ctl-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; column-gap: 12px; }
+body.has-media #x-batteries-m:not(:empty) { display: flex; margin-top: 10px; margin-left: auto; }
+body.has-media #x-controls[hidden] ~ #x-batteries-m { display: none; }
 body:not(.has-media) #x-media { display: none; }
 .clock-time { font-size: 30px; font-weight: 600; letter-spacing: -.6px; font-variant-numeric: tabular-nums; }
 .clock-date { font-size: 12px; color: var(--fg2); margin-top: 2px; }

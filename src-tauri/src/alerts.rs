@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -65,7 +66,7 @@ fn read_power() -> Option<Power> {
 
 // ---------------- Bluetooth ----------------
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BtDevice {
     pub id: String,
     pub name: String,
@@ -84,6 +85,21 @@ pub fn kind_for(major: i32, minor: i32, name: &str) -> &'static str {
         5 if minor == 1 || minor == 2 => "gamepad",
         _ => "bluetooth",
     }
+}
+
+/// Dispozitivele conectate cu baterie cunoscută, în ordinea numelui (pentru fila Acasă).
+pub fn battery_list(devs: &[BtDevice]) -> Vec<BtDevice> {
+    let mut out: Vec<BtDevice> = devs.iter().filter(|d| d.battery.is_some()).cloned().collect();
+    out.sort_by_cached_key(|d| d.name.to_lowercase());
+    out
+}
+
+/// Ultima listă emisă ca `batteries`, pentru cererile din interfață.
+static BATTERIES: Mutex<Vec<BtDevice>> = Mutex::new(Vec::new());
+
+#[tauri::command]
+pub fn batteries_list() -> Vec<BtDevice> {
+    BATTERIES.lock().map(|l| l.clone()).unwrap_or_default()
 }
 
 pub fn bt_transition(prev: Option<&[BtDevice]>, cur: &[BtDevice]) -> Vec<Alert> {
@@ -197,12 +213,14 @@ fn read_bluetooth() -> windows::core::Result<Vec<BtDevice>> {
     Ok(out)
 }
 
-/// Baterie și rețea la 2 s, Bluetooth la 4 s; emite `alert` pentru fiecare schimbare.
+/// Baterie și rețea la 2 s, Bluetooth la 4 s; emite `alert` pentru fiecare schimbare
+/// și `batteries` când se schimbă lista dispozitivelor cu baterie.
 /// O schimbare de rețea e anunțată doar după ce se vede de 2 ori la rând (fără clipiri).
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut power: Option<Power> = None;
         let mut bt: Option<Vec<BtDevice>> = None;
+        let mut batt: Option<Vec<BtDevice>> = None;
         let mut net: Option<Net> = None;
         let mut net_seen: Option<Net> = None;
         let mut bt_retry_at = std::time::Instant::now();
@@ -232,20 +250,37 @@ pub fn spawn(app: AppHandle) {
             }
             if !modules.alerts {
                 power = None;
-                bt = None;
-                continue;
-            }
-            if let Some(cur) = read_power() {
+            } else if let Some(cur) = read_power() {
                 if let Some(a) = power_transition(power.as_ref(), &cur) {
                     let _ = app.emit("alert", &a);
                 }
                 power = Some(cur);
             }
+            // modulele `alerts` și `batteries` sunt independente: Bluetooth se citește dacă e pornit oricare
+            if !modules.alerts && !modules.batteries {
+                bt = None;
+                batt = None;
+                continue;
+            }
             if tick % 2 == 0 && std::time::Instant::now() >= bt_retry_at {
                 match read_bluetooth() {
                     Ok(cur) => {
-                        for a in bt_transition(bt.as_deref(), &cur) {
-                            let _ = app.emit("alert", &a);
+                        if modules.alerts {
+                            for a in bt_transition(bt.as_deref(), &cur) {
+                                let _ = app.emit("alert", &a);
+                            }
+                        }
+                        if modules.batteries {
+                            let list = battery_list(&cur);
+                            if batt.as_ref() != Some(&list) {
+                                let _ = app.emit("batteries", &list);
+                                if let Ok(mut l) = BATTERIES.lock() {
+                                    *l = list.clone();
+                                }
+                                batt = Some(list);
+                            }
+                        } else {
+                            batt = None;
                         }
                         bt = Some(cur);
                     }
@@ -305,6 +340,12 @@ mod tests {
         let gone = bt_transition(Some(&after), &before);
         assert_eq!(gone[0].detail, "Deconectat");
         assert!(bt_transition(None, &after).is_empty()); // prima citire: fără alerte
+    }
+
+    #[test]
+    fn doar_cu_baterie_cunoscuta() {
+        let l = battery_list(&[dev("1", "Mouse", "mouse", Some(80)), dev("2", "Boxă", "speaker", None), dev("3", "AirPods", "headphones", Some(15))]);
+        assert_eq!(l.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["AirPods", "Mouse"]);
     }
 
     #[test]

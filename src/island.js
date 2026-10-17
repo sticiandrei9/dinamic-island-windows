@@ -500,6 +500,7 @@ function startDemo() {
   if (p.get('sleep') === 'pill') setTimeout(() => media.update(null), 1100); // ?sleep=pill: somnul singur în pastilă
   if (p.has('sleep')) setTimeout(() => window.dispatchEvent(new CustomEvent('sleep-demo', { detail: { ends_at: Date.now() + 25 * 60_000, total_ms: 30 * 60_000 } })), 1200); // timer de somn (sleep-view.js)
   if (p.has('controls')) setTimeout(() => window.dispatchEvent(new CustomEvent('controls-demo', { detail: { wifi: true, bluetooth: false, dark: true, night: true, dnd: true, mic_muted: true } })), 1200); // centrul de control (controls-view.js)
+  if (p.has('batteries')) setTimeout(() => window.dispatchEvent(new CustomEvent('batteries-demo', { detail: [{ id: '1', name: 'AirPods Pro', kind: 'headphones', battery: 80 }, { id: '2', name: 'MX Master', kind: 'mouse', battery: 15 }, { id: '3', name: 'Keychron K2', kind: 'keyboard', battery: 62 }, { id: '4', name: 'DualSense', kind: 'gamepad', battery: 45 }] })), 1200); // baterii Bluetooth (batteries-view.js)
   if (p.has('timer')) setTimeout(() => island.setActivity('timer', { kind: 'timer', progress: 0.6 }), 1200);
   if (p.has('alert')) setTimeout(() => island.pushTransient({ kind: 'alert', icon: 'headphones', title: 'AirPods Pro', detail: 'Conectat', level: 0.8, color: 'var(--fg)', duration: 4000 }), 1500);
   if (p.has('volume')) setTimeout(() => island.pushTransient({ kind: 'volume', level: 0.62, waves: 2, duration: 3000 }), 1500);

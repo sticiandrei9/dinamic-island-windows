@@ -37,7 +37,7 @@ function renderModules() {
     row.append(label, sw);
     box.append(row);
     if (key === 'claude') box.append(claudeStatusRow());
-    if (key === 'ci') box.append(ciStatusRow());
+    if (key === 'ci') box.append(ciStatusRow(), ...cloudflareRows());
   }
 }
 
@@ -84,6 +84,49 @@ function ciStatusRow() {
     }).catch(() => { small.className = 'error'; small.textContent = t('settings.ciError'); });
   }
   return row;
+}
+
+// Cloudflare sub comutatorul CI: token (doar citire) + ID-ul contului; „Verifică” citește chiar acum ce folosește insula
+function cloudflareRows() {
+  const col = (key, type, labelKey, hint) => {
+    const row = Object.assign(document.createElement('div'), { className: 'row col', hidden: !settings.modules.ci });
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.append(Object.assign(document.createElement('span'), { textContent: t(labelKey) }), hint);
+    const input = Object.assign(document.createElement('input'), { type, value: settings[key] ?? '', spellcheck: false, autocomplete: 'off' });
+    input.addEventListener('change', () => { settings[key] = input.value.trim(); save(); });
+    row.append(label, input);
+    return row;
+  };
+  const tokenHint = Object.assign(document.createElement('small'), { textContent: `${t('settings.cfTokenHint')} ` });
+  const link = Object.assign(document.createElement('a'), { href: '#', textContent: t('settings.cfTokenLink') });
+  link.addEventListener('click', (e) => { e.preventDefault(); invoke('open_url', { url: 'https://dash.cloudflare.com/profile/api-tokens' }).catch(() => {}); });
+  tokenHint.append(link);
+  const check = Object.assign(document.createElement('div'), { className: 'row', hidden: !settings.modules.ci });
+  const result = document.createElement('small');
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.append(result);
+  const btn = Object.assign(document.createElement('button'), { className: 'btn', textContent: t('settings.cfCheck') });
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    result.className = '';
+    result.textContent = '…';
+    await invoke('set_settings', { settings }).catch(() => {}); // câmpul editat acum a fost salvat de `change`, dar apelul poate fi încă în drum
+    try {
+      result.textContent = t('settings.cfOk', { v: await invoke('ci_check_cloudflare') });
+    } catch (err) {
+      result.className = 'error';
+      result.textContent = t('settings.cfError', { v: err });
+    }
+    btn.disabled = false;
+  });
+  check.append(label, btn);
+  return [
+    col('cloudflare_token', 'password', 'settings.cfToken', tokenHint),
+    col('cloudflare_account', 'text', 'settings.cfAccount', Object.assign(document.createElement('small'), { textContent: t('settings.cfAccountHint') })),
+    check,
+  ];
 }
 
 function renderControls() {

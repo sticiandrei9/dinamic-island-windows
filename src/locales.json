@@ -274,7 +274,15 @@
     "settings.ciMissing": "GitHub CLI (gh) nu e instalat.",
     "settings.ciUnauthenticated": "gh nu e autentificat: rulează „gh auth login”.",
     "settings.ciError": "gh nu a răspuns. Verifică conexiunea.",
-    "settings.ciBudget": "Pauză: s-au folosit 1000 de apeluri în ultima oră."
+    "settings.ciBudget": "Pauză: s-au folosit 1000 de apeluri în ultima oră.",
+    "settings.cfToken": "Token Cloudflare",
+    "settings.cfTokenHint": "Doar citire. Creează un token de utilizator (nu de cont) cu Account → Cloudflare Pages: Read, Workers CI: Read și Workers Scripts: Read. Rămâne doar pe acest PC.",
+    "settings.cfTokenLink": "Creează un token în Cloudflare",
+    "settings.cfAccount": "ID-ul contului Cloudflare",
+    "settings.cfAccountHint": "Din panou: Workers & Pages → Account ID (32 de litere și cifre). Fără ambele câmpuri, Cloudflare nu e urmărit.",
+    "settings.cfCheck": "Verifică",
+    "settings.cfOk": "Merge ({v}).",
+    "settings.cfError": "Nu merge: {v}."
   },
   "en": {
     "tab.home": "Home",
@@ -543,7 +551,15 @@
     "settings.ciMissing": "GitHub CLI (gh) is not installed.",
     "settings.ciUnauthenticated": "gh is not signed in: run \"gh auth login\".",
     "settings.ciError": "gh did not respond. Check your connection.",
-    "settings.ciBudget": "Paused: 1000 calls used in the last hour."
+    "settings.ciBudget": "Paused: 1000 calls used in the last hour.",
+    "settings.cfToken": "Cloudflare token",
+    "settings.cfTokenHint": "Read-only. Create a user token (not an account token) with Account → Cloudflare Pages: Read, Workers CI: Read and Workers Scripts: Read. It stays on this PC.",
+    "settings.cfTokenLink": "Create a token in Cloudflare",
+    "settings.cfAccount": "Cloudflare account ID",
+    "settings.cfAccountHint": "From the dashboard: Workers & Pages → Account ID (32 letters and digits). Without both fields Cloudflare is not watched.",
+    "settings.cfCheck": "Check",
+    "settings.cfOk": "Works ({v}).",
+    "settings.cfError": "Does not work: {v}."
   },
   "ru": {
     "tab.home": "Главная",
@@ -828,6 +844,14 @@
     "settings.ciMissing": "GitHub CLI (gh) не установлен.",
     "settings.ciUnauthenticated": "gh не авторизован: выполните «gh auth login».",
     "settings.ciError": "gh не ответил. Проверьте подключение.",
-    "settings.ciBudget": "Пауза: за последний час использовано 1000 вызовов."
+    "settings.ciBudget": "Пауза: за последний час использовано 1000 вызовов.",
+    "settings.cfToken": "Токен Cloudflare",
+    "settings.cfTokenHint": "Только чтение. Создайте токен пользователя (не аккаунта) с правами Account → Cloudflare Pages: Read, Workers CI: Read и Workers Scripts: Read. Он хранится только на этом ПК.",
+    "settings.cfTokenLink": "Создать токен в Cloudflare",
+    "settings.cfAccount": "ID аккаунта Cloudflare",
+    "settings.cfAccountHint": "В панели: Workers & Pages → Account ID (32 буквы и цифры). Без обоих полей Cloudflare не отслеживается.",
+    "settings.cfCheck": "Проверить",
+    "settings.cfOk": "Работает ({v}).",
+    "settings.cfError": "Не работает: {v}."
   }
 }

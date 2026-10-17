@@ -101,6 +101,7 @@ fn main() {
             calendar::open_url,
             ci::ci_status,
             ci::ci_current,
+            ci::ci_check_cloudflare,
             claude::claude_sessions,
             claude::claude_focus,
             claude::claude_icon,

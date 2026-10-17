@@ -57,6 +57,7 @@ h2 { font-size: 13px; font-weight: 600; color: var(--fg2); margin: 18px 12px 6px
 input[type="password"], input[type="text"] { font: inherit; color: var(--fg); background: var(--control); border: 0; border-radius: 7px; padding: 6px 8px; width: 100%; user-select: text; }
 .btn.recording { background: var(--accent); color: #fff; }
 small.error { color: #ff453a; }
+small a { color: var(--accent); cursor: pointer; }
 select { font: inherit; color: var(--fg); background: var(--control); border: 0; border-radius: 7px; padding: 5px 8px; max-width: 260px; }
 
 .buttons { display: flex; gap: 8px; flex: none; }

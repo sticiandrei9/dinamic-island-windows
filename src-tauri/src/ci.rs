@@ -1,7 +1,8 @@
 //! CI în insulă: rulările GitHub Actions din repo-urile proprii, prin `gh` (procesul existent, autentificat;
 //! aplicația nu citește tokenul). Cât `modules.ci` e pornit: la 30 s cât rulează ceva, altfel la 60 s.
 //! Emite `ci` (rulările în curs, doar la schimbare) și `ci-done` (o rulare care s-a terminat).
-//! Sursele sunt o listă (`Result<Vec<Run>, String>` fiecare), ca Cloudflare să se adauge fără a atinge restul.
+//! Sursele sunt o listă (`Result<Vec<Run>, String>` fiecare): GitHub și, cu token + ID de cont în Setări,
+//! Cloudflare (deployment-urile Pages și build-urile Workers, prin API-ul REST cu `ureq`; tokenul nu intră în log).
 
 use std::collections::VecDeque;
 use std::io::Read;
@@ -18,7 +19,7 @@ use crate::settings::SettingsState;
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Run {
     pub id: String,
-    /// "github" (mai târziu și "cloudflare")
+    /// "github" | "cloudflare"
     pub source: String,
     pub project: String,
     pub name: String,
@@ -214,6 +215,140 @@ fn classify_failure(stderr: &str) -> &'static str {
     }
 }
 
+// ---------- Cloudflare: logica pură ----------
+
+/// Paginile din panou, fără ID-ul contului (`?to=/:account/…` îl completează panoul singur).
+const CF_DASH: &str = "https://dash.cloudflare.com/?to=/:account";
+/// Cel mult atâtea proiecte Pages și atâtea Workers urmărite (apeluri/oră: fiecare costă ~60).
+const CF_MAX: usize = 3;
+
+/// `result` din răspuns; `success: false` sau alt corp e eroare, iar textul serverului nu ajunge în mesaj.
+fn cf_list(json: &str) -> Result<Vec<serde_json::Value>, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|_| "răspuns care nu e JSON".to_string())?;
+    if v.get("success").and_then(|s| s.as_bool()) == Some(false) {
+        return Err("Cloudflare a refuzat cererea".into());
+    }
+    v.get("result").and_then(|r| r.as_array()).cloned().ok_or_else(|| "răspuns fără result".to_string())
+}
+
+fn cf_time(v: &serde_json::Value, key: &str) -> Option<u64> {
+    v.get(key)?.as_str().and_then(parse_iso)
+}
+
+/// Numele intră în adrese: doar litere, cifre, `-` și `_`.
+fn cf_safe(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Deployment-urile unui proiect Pages (`result[]` din `…/pages/projects/{p}/deployments`). În curs = orice
+/// etapă care nu e încheiată (`deploy` + `success`); `failure` = eșuat; `canceled`, `skipped` și cele sărite nu dau nimic.
+pub fn parse_pages(json: &str, project: &str) -> Result<Vec<Run>, String> {
+    Ok(cf_list(json)?
+        .iter()
+        .filter_map(|d| {
+            if d.get("is_skipped").and_then(|s| s.as_bool()) == Some(true) {
+                return None;
+            }
+            let id = d.get("id")?.as_str()?;
+            let stage = d.get("latest_stage")?;
+            let state = match (stage.get("name")?.as_str()?, stage.get("status")?.as_str()?) {
+                (_, "canceled" | "skipped") => return None,
+                (_, "failure") => "failed",
+                ("deploy", "success") => "ok",
+                _ => "running",
+            };
+            // reușit: site-ul; altfel jurnalul build-ului din panou
+            let site = d.get("url").and_then(|u| u.as_str()).filter(|u| state == "ok" && u.starts_with("https://"));
+            Some(Run {
+                id: id.into(),
+                source: "cloudflare".into(),
+                project: project.into(),
+                name: d.pointer("/deployment_trigger/metadata/branch").and_then(|b| b.as_str()).or_else(|| d.get("environment")?.as_str()).unwrap_or("Pages").into(),
+                state: state.into(),
+                url: site.map(String::from).unwrap_or_else(|| format!("{CF_DASH}/pages/view/{project}/{id}")),
+                finished_at: if state == "running" { None } else { cf_time(d, "modified_on") },
+                run_attempt: 1,
+            })
+        })
+        .collect())
+}
+
+/// Build-urile unui Worker (`result[]` din `…/builds/workers/{tag}/builds`). În curs = `queued`, `initializing`,
+/// `running`; `stopped` e reușit (`success`) sau eșuat (`fail`, `terminated`); `skipped` și `cancelled` nu dau nimic.
+pub fn parse_worker_builds(json: &str, project: &str) -> Result<Vec<Run>, String> {
+    Ok(cf_list(json)?
+        .iter()
+        .filter_map(|b| {
+            let id = b.get("build_uuid")?.as_str()?;
+            let state = match (b.get("status")?.as_str()?, b.get("build_outcome").and_then(|o| o.as_str())) {
+                ("queued" | "initializing" | "running", _) => "running",
+                ("stopped", Some("success")) => "ok",
+                ("stopped", Some("fail" | "terminated")) => "failed",
+                _ => return None,
+            };
+            Some(Run {
+                id: id.into(),
+                source: "cloudflare".into(),
+                project: project.into(),
+                name: b.pointer("/build_trigger_metadata/branch").and_then(|n| n.as_str()).unwrap_or("build").into(),
+                state: state.into(),
+                url: format!("{CF_DASH}/workers/services/view/{project}/production/builds/{id}"),
+                finished_at: if state == "running" { None } else { cf_time(b, "stopped_on").or_else(|| cf_time(b, "modified_on")) },
+                run_attempt: 1,
+            })
+        })
+        .collect())
+}
+
+/// Proiectele Pages (din `…/pages/projects`) cu ultimul deployment din ultimele 7 zile, cele mai noi întâi.
+fn cf_active_pages(json: &str, now: u64) -> Vec<String> {
+    let mut found: Vec<(u64, String)> = cf_list(json)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| {
+            let name = p.get("name")?.as_str().filter(|n| cf_safe(n))?;
+            let last = p.get("latest_deployment")?;
+            let at = cf_time(last, "modified_on").or_else(|| cf_time(last, "created_on"))?;
+            (now.saturating_sub(at) <= ACTIVE_DAYS * 86_400).then(|| (at, name.to_string()))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().take(CF_MAX).map(|(_, n)| n).collect()
+}
+
+/// Workers (din `…/workers/scripts`): (nume, tag) ale celor mai recent modificate. Fără limită de vârstă:
+/// un build care eșuează nu modifică scriptul, deci vârsta nu arată dacă are build-uri.
+fn cf_recent_workers(json: &str) -> Vec<(String, String)> {
+    let mut found: Vec<(u64, String, String)> = cf_list(json)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| {
+            let name = w.get("id")?.as_str().filter(|n| cf_safe(n))?;
+            let tag = w.get("tag")?.as_str().filter(|n| cf_safe(n))?;
+            Some((cf_time(w, "modified_on").unwrap_or(0), name.to_string(), tag.to_string()))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().take(CF_MAX).map(|(_, n, t)| (n, t)).collect()
+}
+
+/// Mesaj scurt pentru un cod HTTP de la Cloudflare; `need` = dreptul de citire necesar apelului.
+/// Fără token, fără adrese, fără textul serverului.
+fn cf_error(code: u16, need: &str) -> String {
+    match code {
+        401 => "tokenul e respins de Cloudflare (invalid, expirat sau de cont: Workers cer unul de utilizator)".into(),
+        403 => format!("tokenul nu are dreptul de citire pentru {need}"),
+        404 => "contul nu a fost găsit: verifică ID-ul contului".into(),
+        429 => "prea multe cereri către Cloudflare".into(),
+        _ => format!("Cloudflare a răspuns cu HTTP {code}"),
+    }
+}
+
+/// Cloudflare merge doar cu ambele câmpuri; ID-ul contului intră în adresă, deci doar litere și cifre.
+fn cf_ready(token: &str, account: &str) -> bool {
+    !token.trim().is_empty() && !account.is_empty() && account.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 // ---------- procesul `gh` ----------
 
 fn now_s() -> u64 {
@@ -327,7 +462,80 @@ pub fn ci_current() -> Vec<Run> {
     CURRENT.lock().unwrap().clone()
 }
 
+// ---------- Cloudflare: HTTP ----------
+
+const CF_API: &str = "https://api.cloudflare.com/client/v4";
+const CF_TIMEOUT: Duration = Duration::from_secs(15);
+const PAGES_READ: &str = "Cloudflare Pages Read";
+const SCRIPTS_READ: &str = "Workers Scripts Read";
+const CI_READ: &str = "Workers CI Read";
+
+/// Tokenul și ID-ul contului, din Setări (tăiate); doar dacă ambele sunt completate.
+struct Cf {
+    token: String,
+    account: String,
+}
+
+impl Cf {
+    fn from_settings(app: &AppHandle) -> Option<Cf> {
+        let s = app.state::<SettingsState>().get();
+        let cf = Cf { token: s.cloudflare_token.trim().into(), account: s.cloudflare_account.trim().into() };
+        cf_ready(&cf.token, &cf.account).then_some(cf)
+    }
+
+    /// Calea unei resurse a contului.
+    fn acct(&self, tail: &str) -> String {
+        format!("/accounts/{}{tail}", self.account)
+    }
+}
+
+/// `GET` către Cloudflare (numărat în buget). Erorile sunt mesaje scurte: nici tokenul, nici adresa, nici textul serverului.
+fn cf_get(cf: &Cf, path: &str, need: &str) -> Result<String, String> {
+    {
+        let mut b = BUDGET.lock().unwrap();
+        if !b.ok(now_s()) {
+            return Err("plafonul de apeluri".into());
+        }
+        b.record(now_s());
+    }
+    match ureq::get(&format!("{CF_API}{path}")).set("Authorization", &format!("Bearer {}", cf.token)).timeout(CF_TIMEOUT).call() {
+        Ok(r) => r.into_string().map_err(|_| "răspuns Cloudflare ilizibil".to_string()),
+        Err(ureq::Error::Status(code, _)) => {
+            log::warn!("ci: Cloudflare a răspuns {code}");
+            Err(cf_error(code, need))
+        }
+        Err(ureq::Error::Transport(_)) => Err("Cloudflare nu răspunde".into()),
+    }
+}
+
+/// „Verifică” din Setări: tokenul, apoi cele trei citiri de care are nevoie bucla. Ok = ce a găsit.
+fn check_cloudflare(cf: &Cf) -> Result<String, String> {
+    cf_get(cf, "/user/tokens/verify", "User API Tokens")?;
+    let pages = cf_list(&cf_get(cf, &cf.acct("/pages/projects?per_page=100"), PAGES_READ)?)?.len();
+    let scripts = cf_list(&cf_get(cf, &cf.acct("/workers/scripts"), SCRIPTS_READ)?)?;
+    if let Some(tag) = scripts.iter().find_map(|w| w.get("tag")?.as_str().filter(|t| cf_safe(t))) {
+        cf_get(cf, &cf.acct(&format!("/builds/workers/{tag}/builds?per_page=1")), CI_READ)?;
+    }
+    Ok(format!("Pages: {pages} · Workers: {}", scripts.len()))
+}
+
+#[tauri::command]
+pub async fn ci_check_cloudflare(app: AppHandle) -> Result<String, String> {
+    let cf = Cf::from_settings(&app).ok_or("completează tokenul și ID-ul contului (doar litere și cifre)")?;
+    tauri::async_runtime::spawn_blocking(move || check_cloudflare(&cf)).await.map_err(|_| "eroare internă".to_string())?
+}
+
 // ---------- bucla ----------
+
+/// Un proiect Pages sau un Worker urmărit, cu rulările de la ultima verificare.
+#[derive(Clone)]
+struct CfTarget {
+    worker: bool,
+    /// Pages: numele proiectului; Worker: tag-ul (API-ul Builds cere tag-ul, nu numele)
+    key: String,
+    project: String,
+    last: Vec<Run>,
+}
 
 #[derive(Default)]
 struct Poller {
@@ -342,6 +550,11 @@ struct Poller {
     repos_at: Option<u64>,
     /// ultima verificare a tuturor repo-urilor
     full_at: Option<u64>,
+    /// contul pentru care sunt `cf_targets` (altul în Setări → lista se reface)
+    cf_for: String,
+    cf_targets: Vec<CfTarget>,
+    cf_at: Option<u64>,
+    cf_full_at: Option<u64>,
 }
 
 impl Poller {
@@ -409,6 +622,74 @@ impl Poller {
         Ok(all)
     }
 
+    /// Build-urile Pages și Workers, cu același ritm ca GitHub: cele cu ceva în curs la fiecare ciclu (30 s),
+    /// restul cel mult la 55 s; lista proiectelor se reface la 2 min (și după o eșuare, nu la fiecare ciclu).
+    fn cloudflare(&mut self, now: u64, cf: &Cf) -> Result<Vec<Run>, String> {
+        if self.cf_for != cf.account {
+            self.cf_for = cf.account.clone();
+            self.cf_targets.clear();
+            self.cf_at = None;
+        }
+        if self.cf_at.is_none_or(|t| now.saturating_sub(t) >= REPOS_EVERY) {
+            self.cf_at = Some(now);
+            let pages = cf_get(cf, &cf.acct("/pages/projects?per_page=100"), PAGES_READ).map(|j| cf_active_pages(&j, now));
+            let workers = cf_get(cf, &cf.acct("/workers/scripts"), SCRIPTS_READ).map(|j| cf_recent_workers(&j));
+            if let (Err(e), Err(_)) = (&pages, &workers) {
+                if self.cf_targets.is_empty() {
+                    return Err(e.clone());
+                }
+            }
+            // (worker?, [(key, project)]); o listă care a eșuat își păstrează proiectele de data trecută
+            let found = [
+                (false, pages.map(|v| v.into_iter().map(|n| (n.clone(), n)).collect::<Vec<_>>())),
+                (true, workers.map(|v| v.into_iter().map(|(name, tag)| (tag, name)).collect())),
+            ];
+            let old = std::mem::take(&mut self.cf_targets);
+            for (worker, list) in found {
+                match list {
+                    Ok(list) => self.cf_targets.extend(list.into_iter().map(|(key, project)| {
+                        let last = old.iter().find(|t| t.worker == worker && t.key == key).map(|t| t.last.clone()).unwrap_or_default();
+                        CfTarget { worker, key, project, last }
+                    })),
+                    Err(_) => self.cf_targets.extend(old.iter().filter(|t| t.worker == worker).cloned()),
+                }
+            }
+        }
+        let full = self.cf_full_at.is_none_or(|t| now.saturating_sub(t) >= FULL_EVERY);
+        let (mut all, mut polled, mut failed, mut last_err) = (Vec::new(), 0, 0, String::new());
+        for t in &mut self.cf_targets {
+            if !full && !t.last.iter().any(|r| r.state == "running") {
+                all.extend(t.last.clone());
+                continue;
+            }
+            polled += 1;
+            let (path, need) = if t.worker {
+                (cf.acct(&format!("/builds/workers/{}/builds?per_page=5", t.key)), CI_READ)
+            } else {
+                (cf.acct(&format!("/pages/projects/{}/deployments?per_page=5", t.key)), PAGES_READ)
+            };
+            let res = cf_get(cf, &path, need).and_then(|j| if t.worker { parse_worker_builds(&j, &t.project) } else { parse_pages(&j, &t.project) });
+            match res {
+                Ok(runs) => {
+                    t.last = runs.clone();
+                    all.extend(runs);
+                }
+                Err(e) => {
+                    failed += 1;
+                    last_err = e;
+                    all.extend(t.last.clone());
+                }
+            }
+        }
+        if full {
+            self.cf_full_at = Some(now);
+        }
+        if polled > 0 && failed == polled {
+            return Err(last_err);
+        }
+        Ok(all)
+    }
+
     /// O verificare; întoarce secundele până la următoarea.
     fn cycle(&mut self, app: &AppHandle) -> u64 {
         let paused = !BUDGET.lock().unwrap().ok(now_s());
@@ -422,14 +703,20 @@ impl Poller {
         if !self.gh_ok {
             match check_user() {
                 Ok(_) => self.gh_ok = true,
-                Err(kind) => {
-                    log::info!("ci: gh indisponibil ({kind})");
-                    return 60;
-                }
+                Err(kind) => log::info!("ci: gh indisponibil ({kind})"),
             }
         }
+        let cf = Cf::from_settings(app);
+        if !self.gh_ok && cf.is_none() {
+            return 60;
+        }
         let now = now_s();
-        let fetched = vec![("github", self.github(now))]; // aici se adaugă Cloudflare
+        // fără gh, rulările GitHub de data trecută rămân (Cloudflare merge și fără el)
+        let github = if self.gh_ok { self.github(now) } else { Ok(self.prev.iter().filter(|r| r.source == "github").cloned().collect()) };
+        let mut fetched = vec![("github", github)];
+        if let Some(cf) = &cf {
+            fetched.push(("cloudflare", self.cloudflare(now, cf)));
+        }
         let cur = merge(&self.prev, fetched);
         for (run, kind) in first_time(&mut self.announced, transitions(&self.prev, &cur, self.since)) {
             if kind == "started" {
@@ -681,6 +968,173 @@ mod tests {
         assert_eq!(classify_failure("gh: Bad credentials (HTTP 401)"), "unauthenticated");
         assert_eq!(classify_failure("gh: Not Found (HTTP 404)"), "error");
         assert_eq!(classify_failure(""), "error");
+    }
+
+    // ---------- Cloudflare (JSON în forma din documentația API) ----------
+
+    /// Un deployment Pages (`GET /accounts/{id}/pages/projects/{p}/deployments`) cu etapa curentă dată.
+    fn pages_dep(id: &str, stage: &str, status: &str, extra: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","short_id":"f64788e9","project_name":"site","environment":"production","url":"https://f64788e9.site.pages.dev",
+            "created_on":"2026-10-17T10:00:00.923456Z","modified_on":"2026-10-17T10:05:00.045655Z","is_skipped":false,
+            "latest_stage":{{"name":"{stage}","status":"{status}","started_on":"2026-10-17T10:00:00.1Z","ended_on":null}},
+            "deployment_trigger":{{"type":"github:push","metadata":{{"branch":"main","commit_hash":"ad9c","commit_message":"Update index.html"}}}}{extra}}}"#
+        )
+    }
+
+    fn pages_json(deps: &[String]) -> String {
+        format!(r#"{{"success":true,"errors":[],"messages":[],"result":[{}],"result_info":{{"count":1,"page":1,"per_page":5,"total_count":1,"total_pages":1}}}}"#, deps.join(","))
+    }
+
+    fn states(runs: &[Run]) -> Vec<(&str, &str)> {
+        runs.iter().map(|r| (r.id.as_str(), r.state.as_str())).collect()
+    }
+
+    #[test]
+    fn pages_stari() {
+        let json = pages_json(&[
+            pages_dep("a", "build", "active", ""),
+            pages_dep("b", "queued", "idle", ""),
+            pages_dep("c", "build", "success", ""), // build gata, urmează deploy-ul: tot în curs
+            pages_dep("d", "deploy", "active", ""),
+            pages_dep("e", "deploy", "success", ""),
+            pages_dep("f", "build", "failure", ""),
+            pages_dep("g", "deploy", "failure", ""),
+            pages_dep("h", "build", "canceled", ""),
+            pages_dep("i", "deploy", "skipped", ""),
+            pages_dep("j", "deploy", "success", r#","is_skipped":true"#),
+        ]);
+        let runs = parse_pages(&json, "site").unwrap();
+        assert_eq!(states(&runs), vec![("a", "running"), ("b", "running"), ("c", "running"), ("d", "running"), ("e", "ok"), ("f", "failed"), ("g", "failed")]);
+        assert!(runs.iter().all(|r| r.source == "cloudflare" && r.project == "site" && r.run_attempt == 1));
+    }
+
+    #[test]
+    fn pages_campuri() {
+        let runs = parse_pages(&pages_json(&[pages_dep("e", "deploy", "success", ""), pages_dep("a", "build", "active", ""), pages_dep("f", "build", "failure", "")]), "site").unwrap();
+        // în curs: fără sfârșit; terminat: modified_on (2026-10-17T10:05:00Z)
+        assert_eq!((runs[0].finished_at, runs[1].finished_at, runs[2].finished_at), (Some(1_792_231_500), None, Some(1_792_231_500)));
+        assert_eq!(runs[0].name, "main");
+        // reușit: site-ul; în curs / eșuat: pagina din panou (jurnalul build-ului)
+        assert_eq!(runs[0].url, "https://f64788e9.site.pages.dev");
+        assert_eq!(runs[1].url, "https://dash.cloudflare.com/?to=/:account/pages/view/site/a");
+        assert_eq!(runs[2].url, "https://dash.cloudflare.com/?to=/:account/pages/view/site/f");
+    }
+
+    #[test]
+    fn pages_raspunsuri_ciudate() {
+        assert_eq!(parse_pages(&pages_json(&[]), "site").unwrap(), vec![]);
+        assert!(parse_pages("nu e json", "site").is_err());
+        assert!(parse_pages(r#"{"success":true,"errors":[],"messages":[],"result":null}"#, "site").is_err());
+        let err = r#"{"success":false,"errors":[{"code":10000,"message":"Authentication error"}],"messages":[],"result":null}"#;
+        let e = parse_pages(err, "site").unwrap_err();
+        assert!(!e.contains("Authentication"), "textul serverului nu ajunge în mesaj: {e}");
+        // un deployment fără id sau fără etapă se sare, restul rămân
+        let bad = r#"{"success":true,"result":[{"url":"https://x"},{"id":"z"}]}"#;
+        assert_eq!(parse_pages(bad, "site").unwrap(), vec![]);
+    }
+
+    /// Un build Workers (`GET /accounts/{id}/builds/workers/{tag}/builds`).
+    fn build(uuid: &str, status: &str, outcome: Option<&str>) -> String {
+        let outcome = outcome.map(|o| format!(r#""build_outcome":"{o}","#)).unwrap_or_default();
+        format!(
+            r#"{{"build_uuid":"{uuid}","status":"{status}",{outcome}"created_on":"2026-10-17T10:00:00.117Z","initializing_on":"2026-10-17T10:00:01.117Z",
+            "running_on":"2026-10-17T10:00:02.117Z","stopped_on":"2026-10-17T10:03:00.117Z","modified_on":"2026-10-17T10:03:01.117Z",
+            "build_trigger_metadata":{{"branch":"main","build_trigger_source":"push","commit_hash":"abc","commit_message":"Add","provider_type":"github","repo_name":"r"}}}}"#
+        )
+    }
+
+    fn builds_json(items: &[String]) -> String {
+        format!(r#"{{"success":true,"errors":[],"messages":[],"result":[{}],"result_info":{{"count":1,"page":1,"per_page":5,"total_count":1,"total_pages":1}}}}"#, items.join(","))
+    }
+
+    #[test]
+    fn worker_builds_stari() {
+        let json = builds_json(&[
+            build("q", "queued", None),
+            build("i", "initializing", None),
+            build("r", "running", None),
+            build("s", "stopped", Some("success")),
+            build("f", "stopped", Some("fail")),
+            build("t", "stopped", Some("terminated")),
+            build("k", "stopped", Some("skipped")),
+            build("c", "stopped", Some("cancelled")),
+            build("n", "stopped", None),
+        ]);
+        let runs = parse_worker_builds(&json, "api").unwrap();
+        assert_eq!(states(&runs), vec![("q", "running"), ("i", "running"), ("r", "running"), ("s", "ok"), ("f", "failed"), ("t", "failed")]);
+        assert!(runs.iter().all(|r| r.source == "cloudflare" && r.project == "api" && r.run_attempt == 1 && r.name == "main"));
+        assert_eq!(runs[0].finished_at, None);
+        // terminat: stopped_on (2026-10-17T10:03:00Z)
+        assert_eq!(runs[3].finished_at, Some(1_792_231_380));
+        assert_eq!(runs[3].url, "https://dash.cloudflare.com/?to=/:account/workers/services/view/api/production/builds/s");
+    }
+
+    #[test]
+    fn worker_builds_raspunsuri_ciudate() {
+        assert_eq!(parse_worker_builds(&builds_json(&[]), "api").unwrap(), vec![]);
+        assert!(parse_worker_builds("nu e json", "api").is_err());
+        assert!(parse_worker_builds(r#"{"success":true,"result":null}"#, "api").is_err());
+        let err = r#"{"success":false,"errors":[{"code":12005,"message":"Missing token from authorization header"}],"messages":[],"result":null}"#;
+        let e = parse_worker_builds(err, "api").unwrap_err();
+        assert!(!e.contains("token"), "{e}");
+    }
+
+    #[test]
+    fn cloudflare_proiecte_active() {
+        let now = parse_iso("2026-10-17T12:00:00Z").unwrap();
+        let p = |name: &str, modified: &str| format!(r#"{{"name":"{name}","latest_deployment":{{"modified_on":"{modified}","created_on":"2020-01-01T00:00:00Z"}}}}"#);
+        let json = format!(
+            r#"{{"success":true,"result":[{},{},{},{},{},{},{{"name":"gol","latest_deployment":null}}]}}"#,
+            p("vechi", "2026-10-01T00:00:00.5Z"),
+            p("a", "2026-10-16T00:00:00.5Z"),
+            p("b", "2026-10-17T11:00:00.5Z"),
+            p("c", "2026-10-15T00:00:00.5Z"),
+            p("d", "2026-10-14T00:00:00.5Z"),
+            p("e", "2026-10-13T00:00:00.5Z"),
+        );
+        // cele din ultimele 7 zile, cele mai noi întâi, cel mult 3
+        assert_eq!(cf_active_pages(&json, now), vec!["b", "a", "c"]);
+        assert!(cf_active_pages("nu e json", now).is_empty());
+        assert!(cf_active_pages(r#"{"success":false,"result":null}"#, now).is_empty());
+    }
+
+    #[test]
+    fn cloudflare_workers_recente() {
+        let w = |id: &str, tag: &str, modified: &str| format!(r#"{{"id":"{id}","tag":"{tag}","modified_on":"{modified}"}}"#);
+        let json = format!(
+            r#"{{"success":true,"result":[{},{},{},{},{{"id":"fara-tag"}}]}}"#,
+            w("v", "t1", "2026-01-01T00:00:00Z"),
+            w("n", "t2", "2026-10-17T11:00:00Z"),
+            w("m", "t3", "2026-10-10T00:00:00Z"),
+            w("x", "t4", "2026-10-16T00:00:00Z"),
+        );
+        // cele mai recent modificate, cel mult 3 (fără limită de vârstă: un build care eșuează nu modifică scriptul)
+        assert_eq!(cf_recent_workers(&json), vec![("n".to_string(), "t2".to_string()), ("x".into(), "t4".into()), ("m".into(), "t3".into())]);
+        assert!(cf_recent_workers("nu e json").is_empty());
+    }
+
+    #[test]
+    fn cloudflare_erori_fara_secrete() {
+        assert_eq!(cf_error(403, "Cloudflare Pages Read"), "tokenul nu are dreptul de citire pentru Cloudflare Pages Read");
+        assert!(cf_error(401, "x").contains("token"));
+        assert!(cf_error(404, "x").contains("cont"));
+        assert!(cf_error(500, "x").contains("500"));
+        for code in [401, 403, 404, 429, 500] {
+            let m = cf_error(code, "Workers CI Read");
+            assert!(!m.contains("http") && !m.contains("Bearer"), "{m}");
+        }
+    }
+
+    #[test]
+    fn cloudflare_doar_cu_ambele_campuri() {
+        assert!(cf_ready("tok", "0123456789abcdef0123456789abcdef"));
+        assert!(!cf_ready("", "0123abcd"));
+        assert!(!cf_ready("tok", ""));
+        assert!(!cf_ready("  ", "0123abcd"));
+        // ID-ul intră în adresă: nimic în afară de litere și cifre
+        assert!(!cf_ready("tok", "abc/../x"));
+        assert!(!cf_ready("tok", "abc?x=1"));
     }
 
     #[test]

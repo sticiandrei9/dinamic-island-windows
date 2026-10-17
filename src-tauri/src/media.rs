@@ -532,8 +532,9 @@ pub fn sleep_pause_index(ids: &[String], playing: &[bool], displayed: Option<&st
 }
 
 /// Pauza refuzată sau eșuată pe o sesiune care nu mai cântă tot e reușită: muzica e oprită.
-pub fn pause_outcome(r: windows::core::Result<bool>, still_playing: bool) -> Result<(), String> {
-    control_outcome(r).or_else(|e| if still_playing { Err(e) } else { Ok(()) })
+/// Unele aplicații se opresc asincron, după răspuns: starea se mai citește cât ține `grace`.
+pub fn pause_outcome(r: windows::core::Result<bool>, mut still_playing: impl FnMut() -> bool, grace: Duration) -> Result<(), String> {
+    control_outcome(r).or_else(|e| wait_until(|| (!still_playing()).then_some(Ok(())), grace).map_err(|_| e))
 }
 
 /// Nimic nu cântă acum. Fără GSMTC nu știm: false (fade-ul merge ca înainte).
@@ -550,7 +551,7 @@ pub fn pause_playing(store: &LastMedia) -> Result<(), String> {
         let ids: Vec<String> = list.iter().map(session_id).collect();
         match sleep_pause_index(&ids, &playing, displayed.as_deref()) {
             None => Ok(()),
-            Some(i) => pause_outcome(list[i].TryPauseAsync().and_then(await_op), is_playing(&list[i])),
+            Some(i) => pause_outcome(list[i].TryPauseAsync().and_then(await_op), || is_playing(&list[i]), WINRT_TIMEOUT),
         }
     });
     store.request_resync();
@@ -656,10 +657,20 @@ mod tests {
 
     #[test]
     fn pauza_pe_o_sesiune_deja_oprita_e_reusita() {
-        assert_eq!(pause_outcome(Ok(true), true), Ok(())); // cânta, s-a oprit
-        assert_eq!(pause_outcome(Ok(false), false), Ok(())); // refuzată, dar sesiunea e deja pe pauză
-        assert!(pause_outcome(Ok(false), true).is_err()); // refuzată și cântă încă
-        assert!(pause_outcome(Err(E_FAIL.into()), true).is_err());
+        let g = Duration::from_millis(50);
+        assert_eq!(pause_outcome(Ok(true), || true, g), Ok(())); // cânta, s-a oprit
+        assert_eq!(pause_outcome(Ok(false), || false, g), Ok(())); // refuzată, dar sesiunea e deja pe pauză
+        assert!(pause_outcome(Ok(false), || true, g).is_err()); // refuzată și cântă încă
+        assert!(pause_outcome(Err(E_FAIL.into()), || true, g).is_err());
+    }
+
+    #[test]
+    fn pauza_asincrona_nu_e_esec() {
+        // aplicația răspunde „eșuat”, dar se oprește puțin după: starea se mai citește cât ține răgazul
+        let mut citiri = 0;
+        let r = pause_outcome(Err(E_FAIL.into()), || { citiri += 1; citiri < 3 }, Duration::from_secs(2));
+        assert_eq!(r, Ok(()));
+        assert_eq!(citiri, 3);
     }
 
     #[test]

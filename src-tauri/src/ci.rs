@@ -526,7 +526,7 @@ const CF_API: &str = "https://api.cloudflare.com/client/v4";
 const CF_TIMEOUT: Duration = Duration::from_secs(15);
 const PAGES_READ: &str = "Cloudflare Pages Read";
 const SCRIPTS_READ: &str = "Workers Scripts Read";
-const CI_READ: &str = "Workers CI Read";
+const CI_READ: &str = "Workers Builds Configuration Read";
 
 /// Tokenul și ID-ul contului, din Setări (tăiate); doar dacă ambele sunt completate.
 struct Cf {
@@ -571,7 +571,7 @@ fn cf_get(cf: &Cf, path: &str, need: &str) -> Result<String, String> {
 /// Ok = ce a găsit; Err = un cod de eroare. Un Worker fără Workers Builds (404) nu e o eroare a tokenului.
 fn check_cloudflare(cf: &Cf) -> Result<String, String> {
     cf_get(cf, &cf.acct("/tokens/verify"), "API Tokens").or_else(|_| cf_get(cf, "/user/tokens/verify", "API Tokens"))?;
-    let pages = cf_list(&cf_get(cf, &cf.acct("/pages/projects?per_page=100"), PAGES_READ)?)?.len();
+    let pages = cf_list(&cf_get(cf, &cf.acct("/pages/projects"), PAGES_READ)?)?.len();
     let scripts = cf_list(&cf_get(cf, &cf.acct("/workers/scripts"), SCRIPTS_READ)?)?;
     if let Some(tag) = scripts.iter().find_map(|w| w.get("tag")?.as_str().filter(|t| cf_safe(t))) {
         match cf_get(cf, &cf.acct(&format!("/builds/workers/{tag}/builds?per_page=1")), CI_READ) {
@@ -704,7 +704,8 @@ impl Poller {
         }
         if self.cf_at.is_none_or(|t| now.saturating_sub(t) >= REPOS_EVERY) {
             self.cf_at = Some(now);
-            let pages = cf_get(cf, &cf.acct("/pages/projects?per_page=100"), PAGES_READ).map(|j| cf_active_pages(&j, now));
+            // shortcut: fără `per_page` (100 dă HTTP 400), deci doar prima pagină implicită de proiecte; de paginat dacă cineva are mai multe
+            let pages = cf_get(cf, &cf.acct("/pages/projects"), PAGES_READ).map(|j| cf_active_pages(&j, now));
             let workers = cf_get(cf, &cf.acct("/workers/scripts"), SCRIPTS_READ).map(|j| cf_recent_workers(&j));
             if let (Err(e), Err(_)) = (&pages, &workers) {
                 if self.cf_targets.is_empty() {

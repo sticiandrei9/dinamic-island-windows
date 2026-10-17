@@ -10,6 +10,7 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
+use windows::Win32::Foundation::E_NOTIMPL;
 
 use crate::settings::SettingsState;
 
@@ -57,7 +58,8 @@ fn fft(re: &mut [f32], im: &mut [f32]) {
 }
 
 /// Nivelul celor 5 benzi (0..1) din ultimele 1024 de eșantioane mono: fereastră Hann, FFT,
-/// RMS al magnitudinilor din bandă în dB, −60..0 dB → 0..1 (o sinusoidă la scară plină ≈ 0 dB).
+/// puterea însumată a binurilor din bandă în dB, −80..0 dB → 0..1 (o sinusoidă la scară plină ≈ 0 dB).
+/// Suma (nu media pe bin): altfel benzile late de sus, cu energie mică pe bin, ar sta mereu jos.
 pub fn bands(samples: &[f32], rate: u32) -> [f32; 5] {
     let tail = &samples[samples.len().saturating_sub(N)..];
     let mut re = [0f32; N];
@@ -70,39 +72,39 @@ pub fn bands(samples: &[f32], rate: u32) -> [f32; 5] {
     let norm = N as f32 / 4.0; // amplitudinea A dă vârful A·N/4 cu fereastra Hann
     let mut out = [0.0; 5];
     for (b, level) in out.iter_mut().enumerate() {
-        let (mut sum, mut cnt) = (0.0f32, 0u32);
+        let mut power = 0.0f32;
         for k in 1..N / 2 {
             let f = k as f32 * hz;
             if f >= EDGES[b] && f < EDGES[b + 1] {
-                sum += (re[k] * re[k] + im[k] * im[k]) / (norm * norm);
-                cnt += 1;
+                power += (re[k] * re[k] + im[k] * im[k]) / (norm * norm);
             }
         }
-        if cnt > 0 {
-            let db = 20.0 * (sum / cnt as f32).sqrt().max(1e-9).log10();
-            *level = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
-        }
+        let db = 10.0 * power.max(1e-12).log10();
+        *level = ((db + 80.0) / 80.0).clamp(0.0, 1.0);
     }
     out
 }
 
-/// „Gain” automat: urmărește vârful benzilor (urcă imediat, coboară lent), ca barele să arate bine
-/// și la volum mic; amplificarea e plafonată (4×), altfel zgomotul de fond ar umple barele.
+/// „Gain” automat pe fiecare bandă: vârful ei urcă imediat și coboară lent, ca barele să arate bine
+/// și la volum mic; amplificarea e plafonată (10×), altfel zgomotul de fond ar umple barele.
 pub struct AutoGain {
-    peak: f32,
+    peak: [f32; 5],
 }
 
 impl Default for AutoGain {
     fn default() -> Self {
-        AutoGain { peak: 1.0 }
+        AutoGain { peak: [1.0; 5] }
     }
 }
 
 impl AutoGain {
     pub fn apply(&mut self, b: [f32; 5]) -> [f32; 5] {
-        let max = b.iter().cloned().fold(0.0f32, f32::max);
-        self.peak = (self.peak * 0.98).max(max).max(0.25);
-        b.map(|v| (v / self.peak).min(1.0))
+        let mut out = [0.0; 5];
+        for i in 0..5 {
+            self.peak[i] = (self.peak[i] * 0.98).max(b[i]).max(0.1);
+            out[i] = (b[i] / self.peak[i]).min(1.0);
+        }
+        out
     }
 }
 
@@ -138,16 +140,14 @@ impl Capture {
             } else {
                 f.wFormatTag
             };
+            let (float, bits) = (tag == 3, f.wBitsPerSample);
+            if !(float && bits == 32) && !(tag == 1 && bits == 16) {
+                CoTaskMemFree(Some(fmt as *const _));
+                return Err(windows::core::Error::new(E_NOTIMPL, format!("format nesuportat: tag {tag}, {bits} biți")));
+            }
             let r = client.Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2_000_000, 0, fmt, None);
             CoTaskMemFree(Some(fmt as *const _));
             r?;
-            let (float, bits) = (tag == 3, f.wBitsPerSample);
-            if !(float && bits == 32) && !(tag == 1 && bits == 16) {
-                return Err(windows::core::Error::new(
-                    windows::Win32::Foundation::E_NOTIMPL,
-                    format!("format nesuportat: tag {tag}, {bits} biți"),
-                ));
-            }
             let capture: IAudioCaptureClient = client.GetService()?;
             client.Start()?;
             Ok(Capture {
@@ -226,8 +226,10 @@ pub fn spawn(app: AppHandle) {
         let mut ring: Vec<f32> = Vec::with_capacity(N * 4);
         let mut gain = AutoGain::default();
         let (mut last_sound, mut quiet_sent) = (Instant::now(), false);
+        // dispozitivul cu format nesuportat: nu-l mai redeschidem până se schimbă cel implicit
+        let mut unsupported: Option<String> = None;
         loop {
-            std::thread::sleep(Duration::from_millis(33));
+            std::thread::sleep(Duration::from_millis(if cap.is_some() { 33 } else { 250 }));
             if check_at.elapsed() >= Duration::from_millis(250) {
                 check_at = Instant::now();
                 let want = app.state::<SettingsState>().get().modules.visualizer
@@ -236,9 +238,6 @@ pub fn spawn(app: AppHandle) {
                 if let Some(c) = &cap {
                     let cur = crate::volume::default_endpoint_id(&e).unwrap_or_default();
                     if !want || should_restart(&c.device, &cur, failed) {
-                        if !want {
-                            let _ = app.emit("viz", [0.0f32; 5]); // barele coboară, nu îngheață
-                        }
                         cap = None;
                     }
                 }
@@ -246,7 +245,12 @@ pub fn spawn(app: AppHandle) {
                     failed = false;
                     failed_at = Some(Instant::now());
                 }
-                if want && cap.is_none() && failed_at.map_or(true, |t| t.elapsed() > Duration::from_secs(2)) {
+                let cur = || crate::volume::default_endpoint_id(&e).unwrap_or_default();
+                if want
+                    && cap.is_none()
+                    && failed_at.map_or(true, |t| t.elapsed() > Duration::from_secs(2))
+                    && unsupported.as_ref().map_or(true, |d| *d != cur())
+                {
                     match Capture::open(&e) {
                         Ok(c) => {
                             ring.clear();
@@ -255,6 +259,9 @@ pub fn spawn(app: AppHandle) {
                             cap = Some(c);
                         }
                         Err(err) => {
+                            if err.code() == E_NOTIMPL {
+                                unsupported = Some(cur());
+                            }
                             // o singură dată până la o captură reușită (altfel log la 2 s)
                             if !logged {
                                 logged = true;
@@ -297,7 +304,7 @@ mod tests {
     #[test]
     fn benzi_pe_frecventa() {
         let low = bands(&sine(100.0, 48_000, 1024), 48_000);
-        let high = bands(&sine(4_000.0, 48_000, 1024), 48_000);
+        let high = bands(&sine(5_000.0, 48_000, 1024), 48_000);
         assert!(low[0] > low[4] && low[0] > 0.5);
         assert!(high[4] > high[0] && high[4] > 0.5);
         assert_eq!(bands(&vec![0.0; 1024], 48_000), [0.0; 5]);
@@ -314,6 +321,23 @@ mod tests {
         assert!(b[0] > a[0] && b[0] <= 1.0);
         let c = g.apply([1.0; 5]);
         assert!(c.iter().all(|v| *v <= 1.0));
+    }
+
+    /// Zgomot alb încet (cam cât muzica la volum mic, −50 dBFS): benzile late de sus nu stau moarte.
+    #[test]
+    fn zgomot_larg_ridica_benzile_de_sus() {
+        let mut seed = 1u32;
+        let mut noise = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 * 0.006 - 0.003
+        };
+        let mut g = AutoGain::default();
+        let mut out = [0.0; 5];
+        for _ in 0..200 {
+            let frame: Vec<f32> = (0..1024).map(|_| noise()).collect();
+            out = g.apply(bands(&frame, 48_000));
+        }
+        assert!(out[2..].iter().all(|v| *v > 0.2), "{out:?}");
     }
 
     #[test]

@@ -45,6 +45,7 @@ const bubbleEl = $('bubble');
 const transientEl = $('transient');
 const expandedEl = $('expanded');
 const tabsEl = $('tabs');
+const scrollEl = $('x-scroll');
 
 // pornește de la lățime 0, deci insula „crește” la pornire
 const springs = {
@@ -130,8 +131,21 @@ function activeLayout() {
   return layout([...persistent.values()]);
 }
 
+// Acasă: media/ceasul rămân sus, restul se derulează în spațiul rămas până la plafonul de 330 px
+function fitScroll() {
+  const rest = expandedEl.offsetHeight - scrollEl.offsetHeight; // tab-uri + sus + padding, fără containerul derulabil
+  scrollEl.style.maxHeight = `${Math.max(80, 328 - rest)}px`;
+  fadeScroll();
+}
+// estompare jos cât mai e conținut ascuns dedesubt
+function fadeScroll() {
+  scrollEl.classList.toggle('more-below', scrollEl.scrollTop + scrollEl.clientHeight < scrollEl.scrollHeight - 2);
+}
+scrollEl.addEventListener('scroll', fadeScroll, { passive: true });
+
 function targetSize() {
   if (expanded) {
+    if (tab === 'home') fitScroll();
     const w = tab === 'home' && !media.hasMedia() ? 360 : EXPANDED_W[tab] ?? 420;
     const h = Math.min(330, Math.max(60, expandedEl.offsetHeight + 2));
     return { w, h, r: h > 150 ? 36 : 28 };
@@ -191,7 +205,9 @@ function render() {
 }
 
 // măsurăm conținutul insulei extinse (versuri, rânduri opționale) și adaptăm înălțimea
-new ResizeObserver(() => expanded && retarget()).observe(expandedEl);
+const fitObserver = new ResizeObserver(() => expanded && retarget());
+fitObserver.observe(expandedEl);
+for (const row of scrollEl.children) fitObserver.observe(row); // un rând care apare/crește sub plafon trebuie să recalculeze
 
 // ---------------- activități ----------------
 function renderActivities() {
@@ -445,7 +461,7 @@ if (tauri) {
     if (now !== inside) { inside = now; onHover(now); }
   });
   document.addEventListener('pointerleave', () => { inside = false; onHover(false); });
-  applySettings({ size: 'normal', expand_on: 'hover', modules: {} });
+  applySettings({ size: 'normal', expand_on: 'hover', modules: location.search.includes('full') ? { apps: true } : {} });
   if (demo) startDemo();
 }
 
@@ -497,10 +513,16 @@ function startDemo() {
     media.update(demoInfo);
   }, 900);
   const p = new URLSearchParams(location.search);
+  const full = p.has('full'); // ?demo&full: media + calendar + Claude + baterii + toate butoanele + aplicații, ca să încercăm derularea filei Acasă
+  if (full) {
+    document.getElementById('x-cal').hidden = false;
+    document.getElementById('x-cal').innerHTML = ICONS.calendar + '<b>Sincron echipă</b> · 14:30'; // calendar-view.js nu rulează în browser
+    setTimeout(() => window.dispatchEvent(new CustomEvent('claude-demo', { detail: [{ id: 'a', project: 'insula', state: 'working', hwnd: 1, since: Date.now() }] })), 1200);
+  }
   if (p.get('sleep') === 'pill') setTimeout(() => media.update(null), 1100); // ?sleep=pill: somnul singur în pastilă
   if (p.has('sleep')) setTimeout(() => window.dispatchEvent(new CustomEvent('sleep-demo', { detail: { ends_at: Date.now() + 25 * 60_000, total_ms: 30 * 60_000 } })), 1200); // timer de somn (sleep-view.js)
-  if (p.has('controls')) setTimeout(() => window.dispatchEvent(new CustomEvent('controls-demo', { detail: { wifi: true, bluetooth: false, dark: true, night: true, dnd: true, mic_muted: true } })), 1200); // centrul de control (controls-view.js)
-  if (p.has('batteries')) setTimeout(() => window.dispatchEvent(new CustomEvent('batteries-demo', { detail: [{ id: '1', name: 'AirPods Pro', kind: 'headphones', battery: 80 }, { id: '2', name: 'MX Master', kind: 'mouse', battery: 15 }, { id: '3', name: 'Keychron K2', kind: 'keyboard', battery: 62 }, { id: '4', name: 'DualSense', kind: 'gamepad', battery: 45 }] })), 1200); // baterii Bluetooth (batteries-view.js)
+  if (p.has('controls') || full) setTimeout(() => window.dispatchEvent(new CustomEvent('controls-demo', { detail: { wifi: true, bluetooth: false, dark: true, night: true, dnd: true, mic_muted: true } })), 1200); // centrul de control (controls-view.js)
+  if (p.has('batteries') || full) setTimeout(() => window.dispatchEvent(new CustomEvent('batteries-demo', { detail: [{ id: '1', name: 'AirPods Pro', kind: 'headphones', battery: 80 }, { id: '2', name: 'MX Master', kind: 'mouse', battery: 15 }, { id: '3', name: 'Keychron K2', kind: 'keyboard', battery: 62 }, { id: '4', name: 'DualSense', kind: 'gamepad', battery: 45 }] })), 1200); // baterii Bluetooth (batteries-view.js)
   if (p.has('timer')) setTimeout(() => island.setActivity('timer', { kind: 'timer', progress: 0.6 }), 1200);
   if (p.has('alert')) setTimeout(() => island.pushTransient({ kind: 'alert', icon: 'headphones', title: 'AirPods Pro', detail: 'Conectat', level: 0.8, color: 'var(--fg)', duration: 4000 }), 1500);
   if (p.has('volume')) setTimeout(() => island.pushTransient({ kind: 'volume', level: 0.62, waves: 2, duration: 3000 }), 1500);

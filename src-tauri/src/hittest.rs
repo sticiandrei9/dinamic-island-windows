@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,13 @@ pub fn point_in_rect(px: f64, py: f64, r: &Rect, margin: f64) -> bool {
 /// Colțul ferestrei e pe monitorul (left, top, right, bottom)?
 pub fn on_monitor(pos: (i32, i32), mon: (i32, i32, i32, i32)) -> bool {
     pos.0 >= mon.0 && pos.0 < mon.2 && pos.1 >= mon.1 && pos.1 < mon.3
+}
+
+/// Câte insule sunt vizibile acum (nu ascunse de fullscreen); citit de vizualizator.
+static VISIBLE: AtomicUsize = AtomicUsize::new(0);
+
+pub fn any_island_visible() -> bool {
+    VISIBLE.load(Ordering::Relaxed) > 0
 }
 
 #[tauri::command]
@@ -67,6 +75,7 @@ pub fn spawn(app: AppHandle) {
             let windows: Vec<(String, WebviewWindow)> =
                 app.webview_windows().into_iter().filter(|(l, _)| l.starts_with("island-")).collect();
             states.retain(|l, _| windows.iter().any(|(w, _)| w == l));
+            let mut visible = 0;
 
             for (label, win) in windows {
                 let st = states.entry(label.clone()).or_default();
@@ -98,6 +107,7 @@ pub fn spawn(app: AppHandle) {
                 if hidden {
                     continue;
                 }
+                visible += 1;
 
                 let (Some((cx, cy)), Some(r)) = (cursor, rects.get(&label)) else { continue };
                 let k = size_scale;
@@ -114,6 +124,7 @@ pub fn spawn(app: AppHandle) {
                     let _ = app.emit_to(label.as_str(), "island-hover", inside);
                 }
             }
+            VISIBLE.store(visible, Ordering::Relaxed);
         }
     });
 }

@@ -66,7 +66,7 @@ impl Drop for Endpoint {
     }
 }
 
-fn default_endpoint_id(e: &IMMDeviceEnumerator) -> Option<String> {
+pub(crate) fn default_endpoint_id(e: &IMMDeviceEnumerator) -> Option<String> {
     unsafe {
         let dev = e.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
         let id = dev.GetId().ok()?;

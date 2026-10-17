@@ -28,6 +28,7 @@ mod timer;
 mod tray;
 mod unlock;
 mod updater;
+mod visualizer;
 mod volume;
 mod windows_list;
 
@@ -169,6 +170,7 @@ fn main() {
             }
             dev_demo::spawn(app.handle().clone());
             volume::spawn(app.handle().clone());
+            visualizer::spawn(app.handle().clone());
             notifications::spawn(app.handle().clone());
             screenshot::spawn(app.handle().clone());
             tray::setup(app)?;

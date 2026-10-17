@@ -28,6 +28,13 @@ A MacBook-notch-style island at the top center of your screen. It shows what's p
 - **File shelf:** drag files onto the island to keep them at hand, then drag them out into any app. Right-click a file to copy its path; old files can leave the shelf on their own after 1, 7 or 30 days.
 - **Mirror:** a quick look at your webcam before a call.
 - **Open apps:** icons of your open windows; click one to bring it to the front.
+- **Claude Code:** turn on the Claude module and the island adds a small hook to Claude Code's settings (removed when you turn the module off or uninstall). The pill shows while a session works, turns orange when Claude waits for your approval or answer, and a green “Claude finished” appears at the end; click it to bring that window to the front. Works in the terminal and in the Code tab of Claude Desktop.
+- **Downloads:** while Chrome, Edge or Firefox downloads a file, the pill shows a spinning ring with the size and speed; when it's done, the file appears with Open and Show in folder, and you can drag it into any app.
+- **Unlock:** after you unlock Windows with your PIN or Windows Hello, a small padlock opens in the island.
+- **System tab:** CPU, memory and GPU usage, GPU temperature (NVIDIA, only while the GPU is already busy), current download/upload speed and ping to 1.1.1.1. Sensors are read only while the tab is open.
+- **Clipboard** (off by default): the last 5 copied texts, kept in memory only; each new copy shows its first characters for 2 s. Copies from password managers are skipped.
+- **Sleep timer:** 15, 30 or 60 min from the Timer tab; the volume fades out over the last 10 s, the music pauses and the volume comes back.
+- **Notes:** a quick checklist in its own tab, with an optional global shortcut to start typing.
 - **Settings:** turn each module on or off, expand on hover or click, pick the monitor (or all monitors), the size and the language (English, Română, Русский; automatic follows Windows).
 - **macOS-like motion:** spring animations with a slight overshoot; content fades in with blur and scale.
 - **Stays out of the way:** clicks pass through the area around the island, and it hides while a video or game runs full screen.
@@ -92,6 +99,13 @@ O insulă în stilul notch-ului de MacBook, sus pe centrul ecranului. Din ea vez
 - **Raft de fișiere:** tragi fișiere pe insulă ca să le ai la îndemână, apoi le tragi de acolo în orice aplicație. Click dreapta pe un fișier îi copiază calea; fișierele vechi pot ieși singure după 1, 7 sau 30 de zile.
 - **Oglindă:** te vezi rapid în camera web înainte de un apel.
 - **Aplicații deschise:** iconițele ferestrelor deschise; un click aduce aplicația în față.
+- **Claude Code:** pornești modulul Claude și insula adaugă un mic hook în setările Claude Code (îl scoate când oprești modulul sau dezinstalezi aplicația). Pastila arată cât lucrează o sesiune, devine portocalie când Claude îți așteaptă aprobarea sau răspunsul, iar la final apare „Claude a terminat”, cu verde; un click aduce fereastra aceea în față. Merge în terminal și în fila Code din Claude Desktop.
+- **Descărcări:** cât Chrome, Edge sau Firefox descarcă un fișier, pastila arată un inel care se rotește, cu mărimea și viteza; la final apare fișierul, cu Deschide și Arată în folder, și îl poți trage în orice aplicație.
+- **Deblocare:** după ce deblochezi Windows cu PIN-ul sau Windows Hello, în insulă se deschide un mic lacăt.
+- **Fila Sistem:** procesorul, memoria și placa video, temperatura plăcii video (NVIDIA, doar când placa lucrează deja), viteza de descărcare/încărcare de acum și ping-ul spre 1.1.1.1. Senzorii se citesc doar cât fila e deschisă.
+- **Clipboard** (oprit implicit): ultimele 5 texte copiate, păstrate doar în memorie; la fiecare copiere apar 2 s primele caractere. Ce copiezi din managerele de parole e sărit.
+- **Timer de somn:** 15, 30 sau 60 de minute, din fila Timer; în ultimele 10 s volumul scade treptat, muzica se oprește, iar volumul revine.
+- **Notițe:** o listă rapidă cu bifă, în fila ei, cu o scurtătură globală opțională ca să începi să scrii.
 - **Setări:** pornești sau oprești fiecare modul, alegi extinderea la hover sau la click, monitorul (sau toate), mărimea și limba (Română, English, Русский; „Automat” urmează limba Windows).
 - **Animații ca pe macOS:** spring cu ușor overshoot; conținutul apare cu blur, fade și scale.
 - **Discretă:** click-urile trec prin zona din jurul insulei, iar insula se ascunde când un video sau un joc rulează pe tot ecranul.
@@ -156,6 +170,13 @@ Update-urile sunt acceptate doar dacă sunt semnate cu cheia privată din `%USER
 - **Полка для файлов:** перетащите файлы на островок, чтобы держать их под рукой, а потом перетащите их в любое приложение. Правый клик по файлу копирует путь; старые файлы могут сами убираться через 1, 7 или 30 дней.
 - **Зеркало:** быстро взглянуть на себя через веб-камеру перед звонком.
 - **Открытые приложения:** значки открытых окон; по клику окно выводится на передний план.
+- **Claude Code:** включите модуль Claude, и остров добавит небольшой хук в настройки Claude Code (уберёт его, когда модуль выключат или программу удалят). Пилюля показывает, пока сессия работает, становится оранжевой, когда Claude ждёт вашего разрешения или ответа, а в конце появляется зелёное «Claude закончил»; по клику это окно выводится на передний план. Работает в терминале и во вкладке Code в Claude Desktop.
+- **Загрузки:** пока Chrome, Edge или Firefox скачивает файл, в пилюле крутится кольцо с размером и скоростью; в конце появляется файл с кнопками «Открыть» и «Показать в папке», его можно перетащить в любое приложение.
+- **Разблокировка:** после разблокировки Windows PIN-кодом или Windows Hello на острове открывается маленький замок.
+- **Вкладка «Система»:** загрузка процессора, памяти и видеокарты, температура видеокарты (NVIDIA, только когда она уже работает), текущая скорость загрузки/отдачи и пинг до 1.1.1.1. Датчики читаются только пока вкладка открыта.
+- **Буфер обмена** (по умолчанию выключен): последние 5 скопированных текстов, только в памяти; при каждом копировании на 2 с видны первые символы. Копии из менеджеров паролей пропускаются.
+- **Таймер сна:** 15, 30 или 60 минут на вкладке «Таймер»; за последние 10 с громкость плавно стихает, музыка ставится на паузу, громкость возвращается.
+- **Заметки:** быстрый список с галочками на своей вкладке и необязательное глобальное сочетание клавиш, чтобы сразу начать писать.
 - **Настройки:** включение и выключение каждого модуля, раскрытие по наведению или по клику, выбор монитора (или всех), размера и языка (Русский, English, Română; «Автоматически» — как в Windows).
 - **Анимации как в macOS:** пружинные анимации с лёгким «перелётом»; содержимое появляется с размытием, затуханием и масштабированием.
 - **Не мешает:** клики проходят сквозь область вокруг островка, а при полноэкранном видео или игре он скрывается.

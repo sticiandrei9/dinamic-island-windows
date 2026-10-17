@@ -264,6 +264,11 @@ impl LastMedia {
         self.info.lock().unwrap().clone()
     }
 
+    /// Doar `playing`, fără clonarea copertei (vizualizatorul întreabă de 4 ori pe secundă).
+    pub fn playing(&self) -> bool {
+        self.info.lock().unwrap().as_ref().is_some_and(|m| m.playing)
+    }
+
     pub fn set(&self, info: Option<MediaInfo>) {
         *self.info.lock().unwrap() = info;
     }
@@ -702,8 +707,12 @@ mod tests {
     fn ultima_stare_ramane_disponibila_pentru_interfata() {
         let last = LastMedia::default();
         assert_eq!(last.get(), None);
+        assert!(!last.playing());
         last.set(Some(info("X", true, 1.0)));
+        assert!(last.playing());
         assert_eq!(last.get().map(|m| m.title), Some("X".to_string()));
+        last.set(Some(info("X", false, 1.0)));
+        assert!(!last.playing());
         last.set(None);
         assert_eq!(last.get(), None);
     }

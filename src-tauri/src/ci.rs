@@ -404,6 +404,12 @@ fn now_s() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Locurile instalării implicite: pe mașină (`ProgramFiles`) și pe utilizator (MSI per-user în `LocalAppData`).
+fn gh_install_candidates(program_files: Option<PathBuf>, local_app_data: Option<PathBuf>) -> Vec<PathBuf> {
+    let gh = |d: PathBuf| d.join("GitHub CLI").join("gh.exe");
+    program_files.map(gh).into_iter().chain(local_app_data.map(|d| gh(d.join("Programs")))).collect()
+}
+
 /// `gh.exe` din PATH, altfel din instalarea implicită.
 fn gh_path() -> Option<PathBuf> {
     let in_path = std::env::var_os("PATH")
@@ -412,7 +418,8 @@ fn gh_path() -> Option<PathBuf> {
         .map(|d| d.join("gh.exe"))
         .find(|p| p.is_file());
     in_path.or_else(|| {
-        std::env::var_os("ProgramFiles").map(|d| PathBuf::from(d).join("GitHub CLI").join("gh.exe")).filter(|p| p.is_file())
+        let env = |k| std::env::var_os(k).map(PathBuf::from);
+        gh_install_candidates(env("ProgramFiles"), env("LOCALAPPDATA")).into_iter().find(|p| p.is_file())
     })
 }
 
@@ -848,6 +855,15 @@ pub fn spawn(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gh_se_cauta_si_in_instalarea_per_utilizator() {
+        let c = gh_install_candidates(Some(r"C:\Program Files".into()), Some(r"C:\Users\A\AppData\Local".into()));
+        assert_eq!(c.len(), 2);
+        assert!(c[0].ends_with(r"GitHub CLI\gh.exe"));
+        assert!(c[1].ends_with(r"Programs\GitHub CLI\gh.exe"));
+        assert!(gh_install_candidates(None, None).is_empty());
+    }
 
     fn run(id: &str, state: &str, finished_at: Option<u64>) -> Run {
         Run {

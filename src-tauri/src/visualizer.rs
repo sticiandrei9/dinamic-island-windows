@@ -233,7 +233,7 @@ pub fn spawn(app: AppHandle) {
             if check_at.elapsed() >= Duration::from_millis(250) {
                 check_at = Instant::now();
                 let want = app.state::<SettingsState>().get().modules.visualizer
-                    && app.state::<crate::media::LastMedia>().get().map_or(false, |m| m.playing)
+                    && app.state::<crate::media::LastMedia>().playing()
                     && crate::hittest::any_island_visible();
                 if let Some(c) = &cap {
                     let cur = crate::volume::default_endpoint_id(&e).unwrap_or_default();

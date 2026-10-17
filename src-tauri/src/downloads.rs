@@ -93,6 +93,10 @@ impl Tracker {
     pub fn step(&mut self, listing: &[Entry], now_ms: u64) -> (Vec<Active>, Vec<Done>) {
         let (temps, files): (Vec<_>, Vec<_>) = listing.iter().partition(|e| strip_temp(&e.name).is_some());
 
+        // nu sunt descărcări: fișiere goale, ascunse, de blocare (Office, LibreOffice) sau finale cu temporarul încă alături
+        let has_temp = |f: &Entry| temps.iter().any(|t| strip_temp(&t.name).is_some_and(|b| b.eq_ignore_ascii_case(&f.name)));
+        let real = |f: &Entry| f.bytes > 0 && !f.hidden && !f.name.starts_with("~$") && !f.name.starts_with(".~lock.") && !has_temp(f);
+
         let mut done = Vec::new();
         let mut claimed = HashSet::new();
         // Chrome redenumește „Neconfirmat N” în „nume.ext.crdownload” când începe descărcarea: continuă ca temporarul nou
@@ -107,6 +111,7 @@ impl Tracker {
                 None => files.iter().find(|f| {
                     !self.known.contains(&f.name)
                         && !claimed.contains(&f.name)
+                        && real(f)
                         && (f.created.abs_diff(now_ms) <= MATCH_MS || f.created.abs_diff(tmp.created) <= MATCH_MS)
                 }),
             };
@@ -116,9 +121,6 @@ impl Tracker {
             }
         }
         if self.started {
-            // nu sunt descărcări: fișiere goale, ascunse, de blocare (Office, LibreOffice) sau finale cu temporarul încă alături
-            let has_temp = |f: &Entry| temps.iter().any(|t| strip_temp(&t.name).is_some_and(|b| b.eq_ignore_ascii_case(&f.name)));
-            let real = |f: &Entry| f.bytes > 0 && !f.hidden && !f.name.starts_with("~$") && !f.name.starts_with(".~lock.") && !has_temp(f);
             for f in &files {
                 if !self.known.contains(&f.name) && !claimed.contains(&f.name) && now_ms.saturating_sub(f.created) <= FRESH_MS && real(f) {
                     done.push(Done { name: f.name.clone(), bytes: f.bytes });
@@ -296,6 +298,15 @@ mod tests {
         t.step(&[e("Neconfirmat 1.crdownload", 10, 0), e("vechi.pdf", 5, 0)], 0);
         let (_, d) = t.step(&[e("vechi.pdf", 5, 0), e("raport.pdf", 900, 900)], 1000);
         assert_eq!(d[0].name, "raport.pdf");
+    }
+
+    #[test]
+    fn temporar_neconfirmat_nu_ia_fisiere_de_blocare_sau_goale() {
+        // descărcarea „Neconfirmat” e anulată exact când se deschide un document Office sau apare un fișier gol
+        let mut t = Tracker::default();
+        t.step(&[e("Neconfirmat 1.crdownload", 10, 0)], 0);
+        let (_, d) = t.step(&[e("~$raport.docx", 162, 900), e("gol.zip", 0, 900)], 1000);
+        assert!(d.is_empty());
     }
 
     #[test]

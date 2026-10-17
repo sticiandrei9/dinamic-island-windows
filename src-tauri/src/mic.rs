@@ -43,7 +43,7 @@ pub fn capture_mute(e: &IMMDeviceEnumerator) -> Option<bool> {
 }
 
 /// Mute pe toate microfoanele implicite; eroare doar dacă n-a reușit pe niciunul.
-fn set_capture_mute(e: &IMMDeviceEnumerator, muted: bool) -> Result<(), String> {
+pub fn set_capture_mute(e: &IMMDeviceEnumerator, muted: bool) -> Result<(), String> {
     let mut ok = 0;
     let mut last_err = "nu există microfon".to_string();
     for v in default_endpoints(e) {

@@ -33,6 +33,9 @@ export const ICONS = {
   copy: svg('<rect x="8.5" y="8.5" width="12" height="12" rx="3"/><path d="M15.5 8.5v-2a3 3 0 0 0-3-3h-6a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h2"/>'),
   moon: svg('<path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7z"/>'),
   notes: svg('<rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 9h7M8.5 13h7M8.5 17h4"/>'),
+  contrast: svg('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>'),
+  lock: svg('<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>'),
+  sleep: svg('<path d="M4 7h5L4 13h5M13 11h6l-6 7h6"/>'),
   sparkle: svg('<path d="M12 3c.6 4.8 3.2 7.4 8 9-4.8 1.6-7.4 4.2-8 9-.6-4.8-3.2-7.4-8-9 4.8-1.6 7.4-4.2 8-9z"/>'),
 };
 

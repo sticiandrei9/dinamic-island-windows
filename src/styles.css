@@ -443,3 +443,25 @@ body.has-lyrics .lyrics { display: block; }
 .sl-left { min-width: 56px; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--indigo); text-align: center; }
 .sl-row .pill-btn { white-space: nowrap; }
 .sl-row .pill-btn.indigo { background: rgba(125, 122, 255, .22); color: var(--indigo); }
+
+/* ---------- centru de control ---------- */
+.controls-grid { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.controls-grid[hidden] { display: none; }
+.ctl {
+  width: 34px; height: 34px; border: 0; border-radius: 50%; padding: 0; display: grid; place-items: center;
+  background: rgba(255, 255, 255, .1); color: var(--fg); cursor: pointer;
+  transition: background .2s, transform .18s cubic-bezier(.2, 1.4, .4, 1), filter .15s;
+  animation: ctl-in .4s cubic-bezier(.2, 1.2, .4, 1) backwards;
+}
+.ctl svg { width: 17px; height: 17px; }
+.ctl:hover { background: rgba(255, 255, 255, .18); }
+.ctl:active { transform: scale(.86); }
+.ctl.on { color: #fff; background: var(--ctl, #0a84ff); }
+.ctl.on:hover { filter: brightness(1.15); }
+.ctl[data-name="wifi"], .ctl[data-name="bluetooth"] { --ctl: #0a84ff; }
+.ctl[data-name="dark"] { --ctl: #5e4bc9; }
+.ctl[data-name="night"] { --ctl: var(--orange); }
+.ctl[data-name="dnd"] { --ctl: #bf5af2; }
+.ctl[data-name="mic"] { --ctl: var(--red); }
+.ctl.armed { background: var(--orange); color: #000; }
+@keyframes ctl-in { from { opacity: 0; filter: blur(6px); transform: scale(.6); } }

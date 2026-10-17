@@ -28,6 +28,7 @@ version = "0.58"
 features = [
   "Devices_Bluetooth",
   "Devices_Enumeration",
+  "Devices_Radios",
   "Foundation",
   "Foundation_Collections",
   "Media_Control",
@@ -60,6 +61,7 @@ features = [
   "Win32_System_Power",
   "Win32_System_RemoteDesktop",
   "Win32_System_Rpc",
+  "Win32_System_Shutdown",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",

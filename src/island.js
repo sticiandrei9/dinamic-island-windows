@@ -499,6 +499,7 @@ function startDemo() {
   const p = new URLSearchParams(location.search);
   if (p.get('sleep') === 'pill') setTimeout(() => media.update(null), 1100); // ?sleep=pill: somnul singur în pastilă
   if (p.has('sleep')) setTimeout(() => window.dispatchEvent(new CustomEvent('sleep-demo', { detail: { ends_at: Date.now() + 25 * 60_000, total_ms: 30 * 60_000 } })), 1200); // timer de somn (sleep-view.js)
+  if (p.has('controls')) setTimeout(() => window.dispatchEvent(new CustomEvent('controls-demo', { detail: { wifi: true, bluetooth: false, dark: true, night: true, dnd: true, mic_muted: true } })), 1200); // centrul de control (controls-view.js)
   if (p.has('timer')) setTimeout(() => island.setActivity('timer', { kind: 'timer', progress: 0.6 }), 1200);
   if (p.has('alert')) setTimeout(() => island.pushTransient({ kind: 'alert', icon: 'headphones', title: 'AirPods Pro', detail: 'Conectat', level: 0.8, color: 'var(--fg)', duration: 4000 }), 1500);
   if (p.has('volume')) setTimeout(() => island.pushTransient({ kind: 'volume', level: 0.62, waves: 2, duration: 3000 }), 1500);

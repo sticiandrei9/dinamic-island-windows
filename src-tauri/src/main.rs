@@ -5,6 +5,7 @@ mod calendar;
 mod claude;
 mod claude_hook;
 mod clipboard;
+mod controls;
 mod dev_demo;
 mod displays;
 mod downloads;
@@ -105,6 +106,9 @@ fn main() {
             privacy::set_mirror_active,
             privacy::privacy_current,
             mic::mic_set_mute,
+            controls::controls_state,
+            controls::controls_set,
+            controls::controls_action,
             screenshot::screenshot_save,
             screenshot::screenshot_to_shelf,
             windows_list::list_windows,

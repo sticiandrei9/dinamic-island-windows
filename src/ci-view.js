@@ -49,6 +49,8 @@ export function init(island) {
     renderPill(); // aceeași stare: doar textele (limba)
     if (on === enabled) return;
     enabled = on;
-    if (!on) { apply([]); island.dropTransients('ci'); }
+    if (!on) { apply([]); island.dropTransients('ci'); return; }
+    // primul `ci` poate sosi înainte de setări (și ar fi ignorat): cerem lista curentă
+    invoke('ci_current').then((l) => { if (enabled) apply(l); }).catch(() => {});
   });
 }

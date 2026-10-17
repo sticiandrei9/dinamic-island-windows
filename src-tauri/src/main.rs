@@ -100,6 +100,7 @@ fn main() {
             calendar::calendar_open,
             calendar::open_url,
             ci::ci_status,
+            ci::ci_current,
             claude::claude_sessions,
             claude::claude_focus,
             claude::claude_icon,

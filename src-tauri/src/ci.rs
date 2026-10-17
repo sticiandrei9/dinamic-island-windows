@@ -41,6 +41,12 @@ const HOUR: u64 = 3600;
 const CAP: usize = 1000;
 const REPOS_EVERY: u64 = 120;
 const ACTIVE_DAYS: u64 = 7;
+/// O rulare `queued` mai nouă de atât e „în curs”; una mai veche probabil așteaptă un runner care nu vine.
+const QUEUED_FRESH: u64 = 600;
+/// Repo-urile fără rulare în curs se verifică la acest interval (cele cu rulare, la fiecare ciclu de 30 s).
+/// Apeluri/oră: cel mult 10 repo-uri × 60 + 2 repo-uri cu rulare × 60 în plus + 30 de liste ≈ 750 < 1000.
+const FULL_EVERY: u64 = 55;
+const ANNOUNCED_KEEP: usize = 200;
 const GH_TIMEOUT: Duration = Duration::from_secs(15);
 
 // ---------- logica pură ----------
@@ -91,21 +97,33 @@ fn parse_iso(s: &str) -> Option<u64> {
 /// Răspunsul `/repos/{o}/{r}/actions/runs`: rulările, în forma noastră. Orice altceva (JSON stricat,
 /// `{"message": "Bad credentials"}`) e eroare; textul serverului nu ajunge în mesaj.
 pub fn parse_runs(json: &str, project: &str) -> Result<Vec<Run>, String> {
+    parse_runs_at(json, project, now_s())
+}
+
+/// Ca `parse_runs`, cu momentul curent dat (pentru teste). În listă intră doar rulările în curs (`in_progress`,
+/// plus `queued` de sub 10 minute) și cele terminate; `waiting`, `requested`, `pending` și `queued` vechi se
+/// anunță abia când se termină. `cancelled` și `skipped` nu dau nimic; `neutral` e ok.
+pub fn parse_runs_at(json: &str, project: &str, now: u64) -> Result<Vec<Run>, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|_| "răspuns care nu e JSON".to_string())?;
     let list = v.get("workflow_runs").and_then(|l| l.as_array()).ok_or("răspuns fără workflow_runs")?;
     Ok(list
         .iter()
         .filter_map(|r| {
+            let created = r.get("created_at").and_then(|c| c.as_str()).and_then(parse_iso);
             let state = match (r.get("status")?.as_str()?, r.get("conclusion").and_then(|c| c.as_str())) {
-                ("completed", Some("success")) => "ok",
+                ("completed", Some("success" | "neutral")) => "ok",
+                ("completed", Some("cancelled" | "skipped")) => return None,
                 ("completed", _) => "failed",
-                _ => "running", // queued, in_progress, waiting, requested, pending
+                ("in_progress", _) => "running",
+                ("queued", _) if created.is_some_and(|c| now.saturating_sub(c) < QUEUED_FRESH) => "running",
+                _ => return None,
             };
             Some(Run {
                 id: r.get("id")?.as_u64()?.to_string(),
                 source: "github".into(),
                 project: project.into(),
-                name: r.get("name")?.as_str()?.into(),
+                // `name` poate lipsi sau fi null: atunci titlul rulării
+                name: r.get("name").and_then(|n| n.as_str()).or_else(|| r.get("display_title")?.as_str())?.into(),
                 state: state.into(),
                 url: r.get("html_url")?.as_str()?.into(),
                 finished_at: if state == "running" { None } else { r.get("updated_at").and_then(|u| u.as_str()).and_then(parse_iso) },
@@ -144,6 +162,26 @@ pub fn active_repos(json: &str, now: u64) -> Vec<String> {
             (now.saturating_sub(pushed) <= ACTIVE_DAYS * 86_400).then(|| r.get("full_name")?.as_str().map(String::from))?
         })
         .collect()
+}
+
+/// Doar ce nu s-a anunțat încă: o rulare nu se anunță de două ori (nici dacă reintră în listă, de pildă un
+/// repo care redevine activ); ține minte ultimele `ANNOUNCED_KEEP`. „started” nu e anunț, trece mereu.
+fn first_time(announced: &mut VecDeque<String>, found: Vec<(Run, &'static str)>) -> Vec<(Run, &'static str)> {
+    let mut out = Vec::new();
+    for (run, kind) in found {
+        let key = format!("{}:{}", run.source, run.id);
+        if kind != "started" {
+            if announced.contains(&key) {
+                continue;
+            }
+            announced.push_back(key);
+            if announced.len() > ANNOUNCED_KEEP {
+                announced.pop_front();
+            }
+        }
+        out.push((run, kind));
+    }
+    out
 }
 
 /// Rulările ciclului: ale surselor reușite; o sursă care a eșuat își păstrează rulările de data trecută
@@ -249,23 +287,40 @@ fn call(args: &[&str]) -> Result<String, &'static str> {
     run_gh(args)
 }
 
-/// Contul autentificat (`gh api user`).
+/// Contul autentificat, ținut minte: Setările îl iau de aici, nu mai întreabă `gh` la fiecare afișare.
+static LOGIN: Mutex<Option<String>> = Mutex::new(None);
+/// Rulările în curs, ca `ci_current` să le dea unei insule care a pierdut evenimentul `ci`.
+static CURRENT: Mutex<Vec<Run>> = Mutex::new(Vec::new());
+
+/// Contul autentificat (`gh api user`); reușita se ține minte în `LOGIN`.
 fn check_user() -> Result<String, &'static str> {
     let login = call(&["api", "user", "--jq", ".login"])?;
-    Some(login.trim().to_string()).filter(|l| !l.is_empty()).ok_or("error")
+    let login = Some(login.trim().to_string()).filter(|l| !l.is_empty()).ok_or("error")?;
+    *LOGIN.lock().unwrap() = Some(login.clone());
+    Ok(login)
+}
+
+/// Starea pentru Setări. La plafon nu se cheamă `gh`; altfel `gh` se cheamă doar cât bucla n-a aflat încă contul.
+pub fn status_now() -> CiStatus {
+    let known = LOGIN.lock().unwrap().clone();
+    if !BUDGET.lock().unwrap().ok(now_s()) {
+        return CiStatus { gh: if known.is_some() { "ok" } else { "error" }, user: known, budget_paused: true };
+    }
+    let (gh, user) = match known.map(Ok).unwrap_or_else(check_user) {
+        Ok(u) => ("ok", Some(u)),
+        Err(kind) => (kind, None),
+    };
+    CiStatus { gh, user, budget_paused: false }
 }
 
 #[tauri::command]
 pub async fn ci_status() -> CiStatus {
-    tauri::async_runtime::spawn_blocking(|| {
-        let (gh, user) = match check_user() {
-            Ok(u) => ("ok", Some(u)),
-            Err(kind) => (kind, None),
-        };
-        CiStatus { gh, user, budget_paused: !BUDGET.lock().unwrap().ok(now_s()) }
-    })
-    .await
-    .unwrap_or(CiStatus { gh: "error", user: None, budget_paused: false })
+    tauri::async_runtime::spawn_blocking(status_now).await.unwrap_or(CiStatus { gh: "error", user: None, budget_paused: false })
+}
+
+#[tauri::command]
+pub fn ci_current() -> Vec<Run> {
+    CURRENT.lock().unwrap().clone()
 }
 
 // ---------- bucla ----------
@@ -278,8 +333,11 @@ struct Poller {
     paused: bool,
     prev: Vec<Run>,
     shown: Vec<Run>,
+    announced: VecDeque<String>,
     repos: Vec<String>,
     repos_at: Option<u64>,
+    /// ultima verificare a tuturor repo-urilor
+    full_at: Option<u64>,
 }
 
 impl Poller {
@@ -291,30 +349,48 @@ impl Poller {
         call(args).map_err(|kind| {
             if kind != "error" {
                 self.gh_ok = false;
+                *LOGIN.lock().unwrap() = None;
             }
             kind.to_string()
         })
     }
 
-    /// Rulările recente din repo-urile proprii cu push în ultimele 7 zile.
+    /// Rulările recente din repo-urile proprii cu push în ultimele 7 zile. Repo-urile cu o rulare în curs se
+    /// verifică la fiecare ciclu (30 s), restul cel mult la 55 s; ale celor sărite rămân rulările de data trecută.
     fn github(&mut self, now: u64) -> Result<Vec<Run>, String> {
         if self.repos_at.is_none_or(|t| now.saturating_sub(t) >= REPOS_EVERY) {
-            let json = self.gh(&["api", "/user/repos?affiliation=owner&sort=pushed&per_page=10"])?;
-            self.repos = active_repos(&json, now);
-            self.repos_at = Some(now);
+            // lista veche rămâne dacă apelul eșuează (se reîncearcă la ciclul următor)
+            match self.gh(&["api", "/user/repos?affiliation=owner&sort=pushed&per_page=10"]) {
+                Ok(json) => {
+                    self.repos = active_repos(&json, now);
+                    self.repos_at = Some(now);
+                }
+                Err(e) if self.repos.is_empty() => return Err(e),
+                Err(_) => {}
+            }
         }
-        let (mut all, mut failed) = (Vec::new(), 0);
-        for full in self.repos.clone() {
-            let project = full.rsplit('/').next().unwrap_or(&full).to_string();
-            match self.gh(&["api", &format!("/repos/{full}/actions/runs?per_page=5")]).and_then(|j| parse_runs(&j, &project)) {
+        let full = self.full_at.is_none_or(|t| now.saturating_sub(t) >= FULL_EVERY);
+        let (mut all, mut polled, mut failed) = (Vec::new(), 0, 0);
+        for full_name in self.repos.clone() {
+            let project = full_name.rsplit('/').next().unwrap_or(&full_name).to_string();
+            let before: Vec<Run> = self.prev.iter().filter(|r| r.source == "github" && r.project == project).cloned().collect();
+            if !full && !before.iter().any(|r| r.state == "running") {
+                all.extend(before);
+                continue;
+            }
+            polled += 1;
+            match self.gh(&["api", &format!("/repos/{full_name}/actions/runs?per_page=5")]).and_then(|j| parse_runs(&j, &project)) {
                 Ok(runs) => all.extend(runs),
                 Err(_) => {
                     failed += 1;
-                    all.extend(self.prev.iter().filter(|r| r.source == "github" && r.project == project).cloned());
+                    all.extend(before);
                 }
             }
         }
-        if failed > 0 && failed == self.repos.len() {
+        if full {
+            self.full_at = Some(now);
+        }
+        if polled > 0 && failed == polled {
             return Err("toate apelurile au eșuat".into());
         }
         Ok(all)
@@ -342,7 +418,7 @@ impl Poller {
         let now = now_s();
         let fetched = vec![("github", self.github(now))]; // aici se adaugă Cloudflare
         let cur = merge(&self.prev, fetched);
-        for (run, kind) in transitions(&self.prev, &cur, self.since) {
+        for (run, kind) in first_time(&mut self.announced, transitions(&self.prev, &cur, self.since)) {
             if kind == "started" {
                 log::info!("ci: o rulare a pornit");
             } else {
@@ -352,6 +428,7 @@ impl Poller {
         }
         let running: Vec<Run> = cur.iter().filter(|r| r.state == "running").cloned().collect();
         if running != self.shown {
+            *CURRENT.lock().unwrap() = running.clone();
             let _ = app.emit("ci", &running);
             self.shown = running;
         }
@@ -367,6 +444,7 @@ pub fn spawn(app: AppHandle) {
         loop {
             if !enabled(&app) {
                 if std::mem::take(&mut p.active) && !p.shown.is_empty() {
+                    CURRENT.lock().unwrap().clear();
                     let _ = app.emit("ci", Vec::<Run>::new());
                 }
                 p = Poller::default();
@@ -460,6 +538,71 @@ mod tests {
         assert_eq!((runs[2].state.as_str(), runs[2].finished_at), ("ok", Some(60)));
         assert_eq!(runs[0].project, "p");
         assert_eq!(runs[0].source, "github");
+    }
+
+    /// O rulare GitHub minimală, cu câmpurile date.
+    fn gh_run(id: u32, fields: &str) -> String {
+        format!(r#"{{"id":{id},"html_url":"https://github.com/o/p/actions/runs/{id}","updated_at":"2026-10-14T14:44:21Z",{fields}}}"#)
+    }
+
+    fn parsed(runs: &[String], now: u64) -> Vec<(String, String)> {
+        let json = format!(r#"{{"workflow_runs":[{}]}}"#, runs.join(","));
+        parse_runs_at(&json, "p", now).unwrap().into_iter().map(|r| (r.id, r.state)).collect()
+    }
+
+    #[test]
+    fn concluzii_cancelled_skipped_neutral() {
+        let done = |id, c: &str| gh_run(id, &format!(r#""name":"W","status":"completed","conclusion":"{c}""#));
+        let all = [done(1, "success"), done(2, "neutral"), done(3, "cancelled"), done(4, "skipped"), done(5, "failure"), done(6, "timed_out"), done(7, "action_required")];
+        let got = parsed(&all, 0);
+        let s = |id: &str, st: &str| (id.to_string(), st.to_string());
+        assert_eq!(got, vec![s("1", "ok"), s("2", "ok"), s("5", "failed"), s("6", "failed"), s("7", "failed")]);
+    }
+
+    #[test]
+    fn doar_in_curs_si_queued_proaspat_au_inel() {
+        let now = parse_iso("2026-10-14T15:00:00Z").unwrap();
+        let st = |id, status: &str, created: &str| gh_run(id, &format!(r#""name":"W","status":"{status}","conclusion":null,"created_at":"{created}""#));
+        let got = parsed(
+            &[
+                st(1, "in_progress", "2026-10-14T10:00:00Z"),
+                st(2, "queued", "2026-10-14T14:55:00Z"),
+                st(3, "queued", "2026-10-14T14:40:00Z"),
+                st(4, "waiting", "2026-10-14T14:59:00Z"),
+                st(5, "requested", "2026-10-14T14:59:00Z"),
+                st(6, "pending", "2026-10-14T14:59:00Z"),
+            ],
+            now,
+        );
+        assert_eq!(got, vec![("1".into(), "running".into()), ("2".into(), "running".into())]);
+    }
+
+    #[test]
+    fn numele_cade_pe_titlul_rularii() {
+        let w = |extra: &str| gh_run(1, &format!(r#""status":"completed","conclusion":"success",{extra}"#));
+        let name = |r: String| parse_runs_at(&format!(r#"{{"workflow_runs":[{r}]}}"#), "p", 0).unwrap().first().map(|r| r.name.clone());
+        assert_eq!(name(w(r#""name":null,"display_title":"Fix #3""#)), Some("Fix #3".into()));
+        assert_eq!(name(w(r#""display_title":"Fix #3""#)), Some("Fix #3".into()));
+        assert_eq!(name(w(r#""name":"CI","display_title":"Fix #3""#)), Some("CI".into()));
+        assert_eq!(name(w(r#""name":null"#)), None);
+    }
+
+    #[test]
+    fn o_rulare_nu_se_anunta_de_doua_ori() {
+        let mut seen = VecDeque::new();
+        let r = run("9", "ok", Some(9000));
+        let first = first_time(&mut seen, vec![(r.clone(), "ok")]);
+        assert_eq!(first.len(), 1);
+        // a ieșit din listă și a reintrat (alt ciclu): aceeași rulare, același anunț
+        assert!(first_time(&mut seen, vec![(r.clone(), "ok")]).is_empty());
+        // „started” nu e anunț și nu consumă locul
+        assert_eq!(first_time(&mut seen, vec![(run("10", "running", None), "started")]).len(), 1);
+        // memoria e mărginită: după 200 de rulări noi, prima se poate anunța iar
+        for i in 0..ANNOUNCED_KEEP {
+            first_time(&mut seen, vec![(run(&format!("x{i}"), "ok", Some(9000)), "ok")]);
+        }
+        assert!(seen.len() <= ANNOUNCED_KEEP);
+        assert_eq!(first_time(&mut seen, vec![(r, "ok")]).len(), 1);
     }
 
     #[test]

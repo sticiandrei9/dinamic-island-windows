@@ -35,6 +35,11 @@ A MacBook-notch-style island at the top center of your screen. It shows what's p
 - **Clipboard** (off by default): the last 5 copied texts, kept in memory only; each new copy shows its first characters for 2 s. Copies from password managers are skipped.
 - **Sleep timer:** 15, 30 or 60 min from the Timer tab; the volume fades out over the last 10 s, the music pauses and the volume comes back.
 - **Notes:** a quick checklist in its own tab, with an optional global shortcut to start typing.
+- **Real visualizer:** the bars in the pill and next to the cover move with the sound coming out of your speakers, in the cover's color; they rest when the music is silent or muted.
+- **Control center** in the Home tab: Wi-Fi, Bluetooth, dark mode, Do Not Disturb, microphone, lock and sleep (sleep asks for a second click). A button that doesn't work on your system is hidden.
+- **Bluetooth batteries:** the battery of your connected headphones, mouse or controller next to the clock (red below 20 %).
+- **CI and deploys** (off by default): GitHub Actions runs from your own repos (through the `gh` CLI) and Cloudflare Pages / Workers builds (with a read-only token). A spinning ring while it runs, then a green ✓ or red ✗ for 5 s; click to open the run.
+- The Claude module shows the real Claude icon, taken from the Claude Desktop app installed on your PC.
 - **Settings:** turn each module on or off, expand on hover or click, pick the monitor (or all monitors), the size and the language (English, Română, Русский; automatic follows Windows).
 - **macOS-like motion:** spring animations with a slight overshoot; content fades in with blur and scale.
 - **Stays out of the way:** clicks pass through the area around the island, and it hides while a video or game runs full screen.
@@ -106,6 +111,11 @@ O insulă în stilul notch-ului de MacBook, sus pe centrul ecranului. Din ea vez
 - **Clipboard** (oprit implicit): ultimele 5 texte copiate, păstrate doar în memorie; la fiecare copiere apar 2 s primele caractere. Ce copiezi din managerele de parole e sărit.
 - **Timer de somn:** 15, 30 sau 60 de minute, din fila Timer; în ultimele 10 s volumul scade treptat, muzica se oprește, iar volumul revine.
 - **Notițe:** o listă rapidă cu bifă, în fila ei, cu o scurtătură globală opțională ca să începi să scrii.
+- **Vizualizator real:** barele din pastilă și de lângă copertă se mișcă după sunetul care iese din difuzoare, în culoarea copertei; stau jos când muzica e pe liniște sau pe mute.
+- **Centru de control** în fila Acasă: Wi-Fi, Bluetooth, mod întunecat, Nu deranja, microfon, blocare și sleep (sleep cere al doilea click). Un buton care nu merge pe sistemul tău nu apare.
+- **Baterii Bluetooth:** bateria căștilor, mouse-ului sau controller-ului conectat, lângă ceas (roșu sub 20 %).
+- **CI și deploy-uri** (oprit implicit): rulările GitHub Actions din repo-urile tale (prin `gh`) și build-urile Cloudflare Pages / Workers (cu un token doar de citire). Un inel cât rulează, apoi 5 s un ✓ verde sau un ✗ roșu; un click deschide rularea.
+- Modulul Claude arată iconița reală Claude, luată din aplicația Claude Desktop instalată pe PC.
 - **Setări:** pornești sau oprești fiecare modul, alegi extinderea la hover sau la click, monitorul (sau toate), mărimea și limba (Română, English, Русский; „Automat” urmează limba Windows).
 - **Animații ca pe macOS:** spring cu ușor overshoot; conținutul apare cu blur, fade și scale.
 - **Discretă:** click-urile trec prin zona din jurul insulei, iar insula se ascunde când un video sau un joc rulează pe tot ecranul.
@@ -177,6 +187,11 @@ Update-urile sunt acceptate doar dacă sunt semnate cu cheia privată din `%USER
 - **Буфер обмена** (по умолчанию выключен): последние 5 скопированных текстов, только в памяти; при каждом копировании на 2 с видны первые символы. Копии из менеджеров паролей пропускаются.
 - **Таймер сна:** 15, 30 или 60 минут на вкладке «Таймер»; за последние 10 с громкость плавно стихает, музыка ставится на паузу, громкость возвращается.
 - **Заметки:** быстрый список с галочками на своей вкладке и необязательное глобальное сочетание клавиш, чтобы сразу начать писать.
+- **Настоящий визуализатор:** полоски в пилюле и рядом с обложкой двигаются в такт звуку из динамиков, в цвете обложки; в тишине или без звука они замирают.
+- **Центр управления** на вкладке «Главная»: Wi-Fi, Bluetooth, тёмная тема, «Не беспокоить», микрофон, блокировка и сон (сон требует второго нажатия). Кнопка, которая не работает в вашей системе, не показывается.
+- **Батареи Bluetooth:** заряд подключённых наушников, мыши или геймпада рядом с часами (красным ниже 20 %).
+- **CI и деплои** (по умолчанию выключено): запуски GitHub Actions из ваших репозиториев (через `gh`) и сборки Cloudflare Pages / Workers (с токеном только для чтения). Пока идёт — крутится кольцо, в конце на 5 с зелёная ✓ или красная ✗; по клику открывается запуск.
+- Модуль Claude показывает настоящий значок Claude, взятый из установленного приложения Claude Desktop.
 - **Настройки:** включение и выключение каждого модуля, раскрытие по наведению или по клику, выбор монитора (или всех), размера и языка (Русский, English, Română; «Автоматически» — как в Windows).
 - **Анимации как в macOS:** пружинные анимации с лёгким «перелётом»; содержимое появляется с размытием, затуханием и масштабированием.
 - **Не мешает:** клики проходят сквозь область вокруг островка, а при полноэкранном видео или игре он скрывается.

@@ -65,7 +65,7 @@ body.mic-muted .c-mic { background: rgba(255, 69, 58, .22); color: var(--red); }
 .c-call-text { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--orange); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 body.mic-muted .c-call-text { color: var(--red); }
 #compact[data-kind="call"] .dot.mic { display: none; }
-body.timer-done #compact[data-kind="timer"] { animation: ctl-in .4s cubic-bezier(.2, 1.2, .4, 1) backwards, pulse 1s ease-in-out infinite; }
+body.timer-done #compact[data-kind="timer"] { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
 
 /* punctele de confidențialitate (microfon portocaliu, cameră verde) */

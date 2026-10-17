@@ -216,7 +216,7 @@ body.expanded #expanded {
 .pane.on { display: block; animation: pane-in .35s ease; }
 @keyframes pane-in { from { opacity: 0; filter: blur(6px); transform: translateY(4px); } }
 /* tot ce e sub media/ceas în Acasă: se derulează cu rotița când nu încape (max-height din island.js) */
-#x-scroll { padding-bottom: 4px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+#x-scroll { padding-bottom: 4px; overflow-y: auto; overflow-x: hidden; margin-inline: -22px; padding-inline: 22px; overscroll-behavior: contain; scrollbar-width: none; }
 #x-scroll::-webkit-scrollbar { display: none; }
 #x-scroll.more-below { -webkit-mask-image: linear-gradient(#000 calc(100% - 22px), transparent); mask-image: linear-gradient(#000 calc(100% - 22px), transparent); }
 
@@ -474,10 +474,10 @@ body.has-lyrics .lyrics { display: block; }
 .sl-row .pill-btn.indigo { background: rgba(125, 122, 255, .22); color: var(--indigo); }
 
 /* ---------- centru de control ---------- */
-.controls-grid { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.controls-grid { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
 .controls-grid[hidden] { display: none; }
 .ctl {
-  width: 34px; height: 34px; border: 0; border-radius: 50%; padding: 0; display: grid; place-items: center;
+  flex: none; width: 34px; height: 34px; border: 0; border-radius: 50%; padding: 0; display: grid; place-items: center;
   background: rgba(255, 255, 255, .1); color: var(--fg); cursor: pointer;
   transition: background .2s, transform .18s cubic-bezier(.2, 1.4, .4, 1), filter .15s;
   animation: ctl-in .4s cubic-bezier(.2, 1.2, .4, 1) backwards;

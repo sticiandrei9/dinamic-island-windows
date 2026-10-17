@@ -122,7 +122,7 @@ panes.set('home', {
   module: null,
   icon: ICONS.home,
   title: 'tab.home',
-  onShow: () => { media.setExpanded(true); apps.setActive(settings?.modules?.apps !== false); updateClock(); window.dispatchEvent(new Event('home-show')); },
+  onShow: () => { scrollEl.scrollTop = 0; media.setExpanded(true); apps.setActive(settings?.modules?.apps !== false); updateClock(); window.dispatchEvent(new Event('home-show')); },
   onHide: () => { media.setExpanded(false); apps.setActive(false); },
 });
 

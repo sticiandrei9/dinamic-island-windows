@@ -43,7 +43,11 @@ export function init(island) {
     list.hidden = !list.hidden;
     row.classList.toggle('open', !list.hidden);
     island.refresh();
-    if (!list.hidden) list.scrollIntoView({ block: 'nearest' }); // să nu rămână sub estomparea containerului derulabil
+    if (!list.hidden) { // derulăm doar #x-scroll (scrollIntoView ar putea mișca html/body) și lăsăm loc sub estomparea de 22 px
+      const scrollEl = document.getElementById('x-scroll');
+      const d = list.getBoundingClientRect().bottom - scrollEl.getBoundingClientRect().bottom + 22;
+      if (d > 0) scrollEl.scrollTop += d;
+    }
   });
   window.addEventListener('home-show', () => { close(); refresh(); });
   window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.output !== false; render(); });

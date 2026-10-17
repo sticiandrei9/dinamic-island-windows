@@ -271,7 +271,15 @@ fn night_blobs(paths: &[String]) -> Option<Vec<Vec<u8>>> {
     paths.iter().map(|p| night_blob(p)).collect()
 }
 
+/// Butonul e ascuns (`None`): pe build-ul 26300, testat pe PC, oprirea prin blob are efect, dar pornirea nu,
+/// iar Windows scrie starea „pornit” fără câmpul 0 (invers față de formatul documentat). Până se lămurește
+/// formatul, insula nu oferă o comandă care pare să meargă dar nu face nimic.
 fn night_on() -> Option<bool> {
+    None
+}
+
+#[allow(dead_code)] // citirea reală, păstrată pentru când formatul e confirmat
+fn night_on_from_registry() -> Option<bool> {
     let blobs = night_blobs(&night_paths()?)?;
     night_combined(&blobs[0], &blobs[1..])
 }

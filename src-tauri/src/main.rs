@@ -98,6 +98,7 @@ fn main() {
             calendar::calendar_open,
             claude::claude_sessions,
             claude::claude_focus,
+            claude::claude_icon,
             claude::claude_hook_status,
             claude::claude_hook_install,
             hotkey::hotkey_error,

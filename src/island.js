@@ -228,7 +228,9 @@ function renderTransient(t) {
   transientEl.dataset.kind = t.kind;
   if (t.kind === 'alert' || t.kind === 'update' || t.kind === 'kb' || t.kind === 'claude' || t.kind === 'clip') {
     transientEl.style.setProperty('--t-color', t.color ?? 'var(--fg)');
-    $('t-icon').innerHTML = ICONS[t.icon] ?? ICONS.bell;
+    // `img` (data URL) înlocuiește pictograma, de ex. iconița aplicației Claude
+    if (t.img) $('t-icon').replaceChildren(Object.assign(new Image(), { src: t.img, alt: '', draggable: false }));
+    else $('t-icon').innerHTML = ICONS[t.icon] ?? ICONS.bell;
     $('t-title').textContent = t.title ?? '';
     $('t-detail').textContent = t.detail ?? '';
     const ring = $('t-ring');

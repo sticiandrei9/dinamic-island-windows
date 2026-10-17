@@ -8,8 +8,26 @@ export function init(island) {
   const { invoke, tauri } = island;
   const $ = (id) => document.getElementById(id);
   const row = $('x-claude');
-  $('c-claude-icon').innerHTML = ICONS.sparkle;
-  $('b-claude').innerHTML = ICONS.sparkle;
+  // iconița aplicației Claude Desktop (data URL, din exe-ul instalat); fără ea rămâne steluța
+  let img = null;
+  const fill = (el) => {
+    if (img) el.replaceChildren(Object.assign(new Image(), { src: img, alt: '', draggable: false }));
+    else el.innerHTML = ICONS.sparkle;
+  };
+  const pillAndBubble = () => { fill($('c-claude-icon')); fill($('b-claude')); };
+  let loadingIcon = false;
+  function loadIcon() {
+    if (img || loadingIcon || !tauri) return; // lipsa se reîncearcă din Rust cel mult la 60 s
+    loadingIcon = true;
+    invoke('claude_icon').then((url) => {
+      if (!url) return;
+      img = url;
+      pillAndBubble();
+      rowKey = ''; // rândul din Acasă se redesenează cu imaginea
+      renderRow();
+    }).catch(() => {}).finally(() => { loadingIcon = false; });
+  }
+  pillAndBubble();
   let enabled = false;
   let prev = []; // ultima listă primită, cu `done`: din ea ies tranzițiile
   let active = []; // doar `working` și `waiting`
@@ -19,7 +37,7 @@ export function init(island) {
 
   function announce({ id, project, to }) {
     island.pushTransient({
-      kind: 'claude', id, icon: 'sparkle', color: to === 'waiting' ? 'var(--orange)' : 'var(--green)',
+      kind: 'claude', id, icon: 'sparkle', img, color: to === 'waiting' ? 'var(--orange)' : 'var(--green)',
       title: t(`claude.${to}`), detail: project, duration: to === 'waiting' ? 6000 : 5000, interactive: true,
     });
   }
@@ -51,7 +69,7 @@ export function init(island) {
       row.replaceChildren(...active.map((s) => {
         const el = Object.assign(document.createElement('div'), { className: `claude-item ${s.state}` });
         el.dataset.id = s.id;
-        el.innerHTML = ICONS.sparkle; // pictogramă constantă; proiectul intră doar ca text
+        fill(el); // pictogramă constantă; proiectul intră doar ca text
         el.append(Object.assign(document.createElement('b'), { textContent: s.project }), Object.assign(document.createElement('span'), { className: 'st' }));
         el.addEventListener('click', (e) => { e.stopPropagation(); focus(s.id); island.collapse(); });
         return el;
@@ -66,6 +84,7 @@ export function init(island) {
     active = next.filter((s) => s.state !== 'done');
     const waiting = active.filter((s) => s.state === 'waiting');
     const shown = waiting.length ? waiting : active; // active are acum doar working
+    if (shown.length) loadIcon();
     if (shown.length) $('c-claude-text').textContent = pillLabel(shown);
     island.setActivity('claude', shown.length ? { kind: waiting.length ? 'claude-waiting' : 'claude' } : null);
     renderRow();
@@ -76,6 +95,7 @@ export function init(island) {
   window.addEventListener('claude-demo', (e) => { enabled = true; apply(e.detail); });
   if (!tauri) return;
 
+  loadIcon();
   tauri.event.listen('claude-sessions', (e) => enabled && apply(e.payload));
   window.addEventListener('home-show', updateTimes);
   setInterval(updateTimes, 15_000);

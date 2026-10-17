@@ -4,8 +4,9 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use windows::core::HSTRING;
@@ -14,6 +15,7 @@ use windows::Win32::Storage::FileSystem::{
     FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification, FILE_NOTIFY_CHANGE_FILE_NAME,
     FILE_NOTIFY_CHANGE_LAST_WRITE,
 };
+use windows::Win32::System::Com::COINIT_APARTMENTTHREADED;
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION};
 
@@ -79,7 +81,58 @@ fn is_dev_exe(exe: &str) -> bool {
     exe.to_lowercase().contains(r"\.cargo-target\")
 }
 
+// ---------- iconița aplicației Claude Desktop ----------
+
+/// Căile de instalare cunoscute ale aplicației Claude Desktop (fără MSIX, care are calea în WindowsApps).
+fn known_exes() -> Vec<String> {
+    let Ok(base) = std::env::var("LOCALAPPDATA") else { return Vec::new() };
+    [r"AnthropicClaude\claude.exe", r"Programs\Claude\Claude.exe"].iter().map(|p| format!(r"{base}\{p}")).collect()
+}
+
+/// Exe-ul aplicației Claude Desktop dintre `(cale, are fereastră vizibilă)`: primul `claude.exe` cu fereastră,
+/// altfel primul dintr-o cale de instalare cunoscută. CLI-ul Claude Code (npm, `~\.local\bin`) nu are iconița aplicației.
+pub fn pick_claude_exe(candidates: &[(String, bool)]) -> Option<String> {
+    let known = known_exes();
+    let ok: Vec<_> = candidates
+        .iter()
+        .filter(|(p, _)| {
+            let l = p.to_lowercase();
+            l.rsplit('\\').next() == Some("claude.exe")
+                && !["node_modules", r"\npm\", ".npm", r"\.local\bin\"].iter().any(|b| l.contains(b))
+        })
+        .collect();
+    ok.iter()
+        .find(|(_, win)| *win)
+        .or_else(|| ok.iter().find(|(p, _)| known.iter().any(|k| k.eq_ignore_ascii_case(p))))
+        .map(|(p, _)| p.clone())
+}
+
+/// Iconița găsită rămâne pe toată rularea; o lipsă se reîncearcă cel mult la 60 s.
+fn icon_cached(cache: &mut Option<Result<String, Instant>>, now: Instant, load: impl FnOnce() -> Option<String>) -> Option<String> {
+    match cache {
+        Some(Ok(i)) => return Some(i.clone()),
+        Some(Err(at)) if now.duration_since(*at) < Duration::from_secs(60) => return None,
+        _ => {}
+    }
+    let icon = load();
+    *cache = Some(icon.clone().ok_or(now));
+    icon
+}
+
 // ---------- Win32 ----------
+
+/// Procesele `claude.exe` (cu și fără fereastră) și căile de instalare cunoscute care există.
+fn find_claude_exe() -> Option<String> {
+    let with_window: HashSet<u32> = claude_hook::visible_windows().into_iter().map(|w| w.1).collect();
+    let mut c: Vec<(String, bool)> = claude_hook::snapshot()
+        .into_iter()
+        .filter(|(_, _, name)| name.eq_ignore_ascii_case("claude.exe"))
+        // acces refuzat la un proces: îl sărim
+        .filter_map(|(pid, _, _)| unsafe { crate::windows_list::exe_path(pid) }.map(|p| (p, with_window.contains(&pid))))
+        .collect();
+    c.extend(known_exes().into_iter().filter(|p| Path::new(p).exists()).map(|p| (p, false)));
+    pick_claude_exe(&c)
+}
 
 fn pid_alive(pid: u32) -> bool {
     unsafe {
@@ -240,6 +293,23 @@ pub async fn claude_focus(id: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Iconița aplicației Claude Desktop instalate, ca data URL PNG; `None` dacă nu e găsită (interfața rămâne cu steluța).
+#[tauri::command]
+pub async fn claude_icon() -> Option<String> {
+    static CACHE: Mutex<Option<Result<String, Instant>>> = Mutex::new(None);
+    tauri::async_runtime::spawn_blocking(|| {
+        let _com = crate::platform::ComGuard::new(COINIT_APARTMENTTHREADED);
+        let mut cache = CACHE.lock().unwrap();
+        icon_cached(&mut cache, Instant::now(), || {
+            let png = crate::windows_list::file_icon_png(&find_claude_exe()?)?;
+            Some(format!("data:image/png;base64,{}", STANDARD.encode(png)))
+        })
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[tauri::command]
 pub fn claude_hook_status(state: tauri::State<SettingsState>) -> HookStatus {
     if let Some(s) = FAILED.lock().unwrap().clone() {
@@ -361,5 +431,49 @@ mod tests {
         assert!(is_dev_exe(r"C:\Users\Andre\.cargo-target\dynamic-island\debug\dynamic-island.exe"));
         assert!(is_dev_exe(r"c:\users\andre\.CARGO-TARGET\x\y.exe"));
         assert!(!is_dev_exe(r"C:\Users\Andre\AppData\Local\Dynamic Island\dynamic-island.exe"));
+    }
+
+    #[test]
+    fn alege_exe_claude_desktop() {
+        let c = vec![
+            (r"C:\Users\A\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\claude.exe".to_string(), true),
+            (r"C:\Program Files\WindowsApps\Claude_1.0_x64__pzs8sxrjxfjjc\app\claude.exe".to_string(), true),
+        ];
+        assert_eq!(pick_claude_exe(&c).as_deref(), Some(r"C:\Program Files\WindowsApps\Claude_1.0_x64__pzs8sxrjxfjjc\app\claude.exe"));
+        assert_eq!(pick_claude_exe(&[(r"C:\x\notepad.exe".into(), true)]), None);
+        assert_eq!(pick_claude_exe(&[(r"C:\x\Claude.exe".into(), false)]), None); // fără fereastră și nu e o cale cunoscută
+        // CLI-ul Claude Code nu are iconița aplicației, nici cu fereastră
+        assert_eq!(pick_claude_exe(&[(r"C:\Users\A\AppData\Roaming\npm\claude.exe".into(), true)]), None);
+        assert_eq!(pick_claude_exe(&[(r"C:\Users\A\.local\bin\claude.exe".into(), true)]), None);
+    }
+
+    #[test]
+    fn calea_cunoscuta_fara_fereastra_se_alege_dupa_cea_cu_fereastra() {
+        let Some(known) = known_exes().into_iter().next() else { return };
+        let win = r"C:\Program Files\WindowsApps\Claude_1.0_x64__pzs8sxrjxfjjc\app\claude.exe".to_string();
+        assert_eq!(pick_claude_exe(&[(known.to_uppercase(), false)]).as_deref(), Some(known.to_uppercase().as_str()));
+        assert_eq!(pick_claude_exe(&[(known.clone(), false), (win.clone(), true)]), Some(win));
+    }
+
+    #[test]
+    fn iconita_se_tine_si_lipsa_se_reincearca_dupa_un_minut() {
+        let t0 = Instant::now();
+        let mut c = None;
+        assert_eq!(icon_cached(&mut c, t0, || None), None);
+        // în primul minut nu se mai caută
+        assert_eq!(icon_cached(&mut c, t0 + Duration::from_secs(59), || panic!("prea devreme")), None);
+        assert_eq!(icon_cached(&mut c, t0 + Duration::from_secs(60), || Some("data:x".into())).as_deref(), Some("data:x"));
+        // găsită: rămâne pe toată rularea
+        assert_eq!(icon_cached(&mut c, t0 + Duration::from_secs(9999), || panic!("din cache")).as_deref(), Some("data:x"));
+    }
+
+    /// Verificare pe PC-ul lui Andrei (doar citire): `cargo test claude_real -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn claude_real_exe_si_iconita() {
+        let exe = find_claude_exe();
+        println!("exe ales: {exe:?}");
+        let png = exe.and_then(|p| crate::windows_list::file_icon_png(&p));
+        println!("PNG: {:?} octeți", png.as_ref().map(Vec::len));
     }
 }

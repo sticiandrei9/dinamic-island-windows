@@ -52,6 +52,7 @@ body.expanded #compact, body.transient #compact { opacity: 0; filter: blur(6px);
 
 .c-icon { width: 18px; height: 18px; display: grid; place-items: center; }
 .c-icon svg { width: 17px; height: 17px; }
+.c-icon img { width: 17px; height: 17px; border-radius: 4px; }
 .c-time { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.2px; }
 #compact[data-kind="timer"] .c-timer { color: var(--orange); }
 #compact[data-kind="stopwatch"] .c-timer { color: var(--green); }
@@ -86,6 +87,7 @@ body.mic-on .dot.mic, body.cam-on .dot.cam { display: block; animation: dot-in .
 /* Claude Code în bulă: aceeași steluță, portocalie când te așteaptă */
 #b-claude { width: 20px; height: 20px; color: var(--fg); }
 #b-claude svg { width: 18px; height: 18px; }
+#b-claude img { width: 18px; height: 18px; border-radius: 4px; }
 #bubble[data-kind="claude"] #b-claude, #bubble[data-kind="claude-waiting"] #b-claude { display: block; }
 #bubble[data-kind="claude"] #b-claude { animation: pulse 1.4s ease-in-out infinite; }
 #bubble[data-kind="claude-waiting"] #b-claude { color: var(--orange); }
@@ -127,6 +129,7 @@ body.transient #transient[data-kind="screenshot"], body.transient #transient[dat
 body.transient #transient[data-kind="claude"] { cursor: pointer; }
 .t-icon { width: 22px; height: 22px; flex: none; display: grid; place-items: center; color: var(--t-color, var(--fg)); }
 .t-icon svg { width: 21px; height: 21px; }
+.t-icon img { width: 21px; height: 21px; border-radius: 5px; }
 .t-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .t-text b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t-text span { font-size: 11.5px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -247,7 +250,8 @@ body.no-apps .apps { display: none; }
 .claude-item:hover { background: rgba(255, 255, 255, .08); }
 .claude-item svg { width: 13px; height: 13px; flex: none; color: var(--fg); }
 .claude-item b { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-.claude-item.working svg { animation: pulse 1.4s ease-in-out infinite; }
+.claude-item img { width: 13px; height: 13px; flex: none; border-radius: 3px; }
+.claude-item.working svg, .claude-item.working img { animation: pulse 1.4s ease-in-out infinite; }
 .claude-item.waiting svg, .claude-item.waiting .st { color: var(--orange); }
 @keyframes claude-in { from { opacity: 0; filter: blur(6px); transform: scale(.94); } }
 .cal-row { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; }

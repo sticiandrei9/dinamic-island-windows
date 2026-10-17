@@ -280,7 +280,7 @@ fn pick_hwnd(chain: &[(u32, String)], wins: &[(isize, u32)]) -> isize {
 }
 
 /// (pid, ppid, nume exe) pentru toate procesele.
-fn snapshot() -> Vec<(u32, u32, String)> {
+pub(crate) fn snapshot() -> Vec<(u32, u32, String)> {
     let mut out = Vec::new();
     unsafe {
         let Ok(h) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
@@ -297,7 +297,7 @@ fn snapshot() -> Vec<(u32, u32, String)> {
 }
 
 /// (hwnd, pid) pentru ferestrele de nivel superior vizibile și cu titlu, în ordinea Z.
-fn visible_windows() -> Vec<(isize, u32)> {
+pub(crate) fn visible_windows() -> Vec<(isize, u32)> {
     unsafe extern "system" fn on_window(h: HWND, lp: LPARAM) -> BOOL {
         let out = &mut *(lp.0 as *mut Vec<(isize, u32)>);
         if IsWindowVisible(h).as_bool() && GetWindowTextLengthW(h) > 0 {

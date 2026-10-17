@@ -113,7 +113,7 @@ unsafe fn candidate(h: HWND, own_pid: u32) -> (Candidate, u32) {
     (c, pid)
 }
 
-unsafe fn exe_path(pid: u32) -> Option<String> {
+pub(crate) unsafe fn exe_path(pid: u32) -> Option<String> {
     let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
     let mut buf = [0u16; 1024];
     let mut len = buf.len() as u32;

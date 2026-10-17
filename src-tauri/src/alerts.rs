@@ -213,6 +213,18 @@ fn read_bluetooth() -> windows::core::Result<Vec<BtDevice>> {
     Ok(out)
 }
 
+/// Reține lista (pentru `batteries_list`) și o emite ca `batteries`, doar dacă diferă de ultima.
+fn publish_batteries(app: &AppHandle, last: &mut Option<Vec<BtDevice>>, list: Vec<BtDevice>) {
+    if last.as_ref() == Some(&list) {
+        return;
+    }
+    if let Ok(mut l) = BATTERIES.lock() {
+        *l = list.clone();
+    }
+    let _ = app.emit("batteries", &list);
+    *last = Some(list);
+}
+
 /// Baterie și rețea la 2 s, Bluetooth la 4 s; emite `alert` pentru fiecare schimbare
 /// și `batteries` când se schimbă lista dispozitivelor cu baterie.
 /// O schimbare de rețea e anunțată doar după ce se vede de 2 ori la rând (fără clipiri).
@@ -271,14 +283,7 @@ pub fn spawn(app: AppHandle) {
                             }
                         }
                         if modules.batteries {
-                            let list = battery_list(&cur);
-                            if batt.as_ref() != Some(&list) {
-                                let _ = app.emit("batteries", &list);
-                                if let Ok(mut l) = BATTERIES.lock() {
-                                    *l = list.clone();
-                                }
-                                batt = Some(list);
-                            }
+                            publish_batteries(&app, &mut batt, battery_list(&cur));
                         } else {
                             batt = None;
                         }
@@ -286,6 +291,9 @@ pub fn spawn(app: AppHandle) {
                     }
                     Err(e) => {
                         log::warn!("Bluetooth indisponibil, reîncerc peste un minut: {e}");
+                        if modules.batteries {
+                            publish_batteries(&app, &mut batt, Vec::new()); // fără listă veche afișată
+                        }
                         bt_retry_at = std::time::Instant::now() + Duration::from_secs(60);
                     }
                 }

@@ -20,21 +20,27 @@ export function init(island) {
   let list = [];
   let built = '';
 
+  function update(el, d) {
+    el.classList.toggle('low', d.battery < LOW);
+    el.title = `${d.name} ${d.battery}%`;
+    el.querySelector('b').textContent = `${d.battery}%`;
+    el.querySelector('.bat-fg').setAttribute('stroke-dasharray', `${Math.min(100, d.battery)} 100`);
+  }
+
+  function chip(d) {
+    const el = document.createElement('span');
+    el.className = 'bat';
+    const icon = document.createElement('span');
+    icon.className = 'bat-icon';
+    icon.innerHTML = ICONS[d.kind === 'speaker' ? 'speakerDevice' : d.kind] ?? ICONS.bluetooth;
+    el.append(icon, document.createElement('b'), ring(d.battery));
+    update(el, d);
+    return el;
+  }
+
   // un singur desen pentru ambele locuri; CSS-ul arată doar locul care se potrivește (cu/fără media)
-  function chips() {
-    const { shown, more } = visibleBatteries(list);
-    const nodes = shown.map((d) => {
-      const el = document.createElement('span');
-      el.className = d.battery < LOW ? 'bat low' : 'bat';
-      el.title = `${d.name} ${d.battery}%`;
-      const icon = document.createElement('span');
-      icon.className = 'bat-icon';
-      icon.innerHTML = ICONS[d.kind === 'speaker' ? 'speakerDevice' : d.kind] ?? ICONS.bluetooth;
-      const pct = document.createElement('b');
-      pct.textContent = `${d.battery}%`;
-      el.append(icon, pct, ring(d.battery));
-      return el;
-    });
+  function chips(shown, more) {
+    const nodes = shown.map(chip);
     if (more) {
       const m = document.createElement('span');
       m.className = 'bat-more';
@@ -45,11 +51,16 @@ export function init(island) {
   }
 
   function render() {
-    const key = enabled ? JSON.stringify(list.slice(0, 4).map((d) => [d.id, d.kind, d.battery])) + list.length : '';
-    if (key === built) return;
-    built = key;
-    for (const t of targets) t?.replaceChildren(...(enabled ? chips() : []));
-    island.refresh();
+    const { shown, more } = visibleBatteries(enabled ? list : []);
+    // rândul se reface doar când se schimbă dispozitivele afișate; la schimbarea procentului chipurile se actualizează pe loc
+    const key = JSON.stringify([shown.map((d) => [d.id, d.kind]), more]);
+    if (key !== built) {
+      built = key;
+      for (const t of targets) t?.replaceChildren(...chips(shown, more));
+      island.refresh();
+      return;
+    }
+    for (const t of targets) shown.forEach((d, i) => t?.children[i] && update(t.children[i], d));
   }
 
   function set(next) { list = Array.isArray(next) ? next.filter((d) => Number.isFinite(d.battery)) : []; render(); }

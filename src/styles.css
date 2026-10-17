@@ -463,5 +463,5 @@ body.has-lyrics .lyrics { display: block; }
 .ctl[data-name="night"] { --ctl: var(--orange); }
 .ctl[data-name="dnd"] { --ctl: #bf5af2; }
 .ctl[data-name="mic"] { --ctl: var(--red); }
-.ctl.armed { background: var(--red); color: #fff; animation: pulse 1s ease-in-out infinite; }
+.ctl.armed { background: var(--red); color: #fff; animation: ctl-in .4s cubic-bezier(.2, 1.2, .4, 1) backwards, pulse 1s ease-in-out infinite; }
 @keyframes ctl-in { from { opacity: 0; filter: blur(6px); transform: scale(.6); } }

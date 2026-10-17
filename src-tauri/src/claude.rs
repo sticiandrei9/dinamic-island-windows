@@ -104,6 +104,13 @@ pub fn pick_claude_exe(candidates: &[(String, bool)]) -> Option<String> {
     ok.iter()
         .find(|(_, win)| *win)
         .or_else(|| ok.iter().find(|(p, _)| known.iter().any(|k| k.eq_ignore_ascii_case(p))))
+        // MSIX-ul Anthropic e protejat prin ACL și poate fi doar în tray (sau un proces ajutor): îl recunoaștem după cale
+        .or_else(|| {
+            ok.iter().find(|(p, _)| {
+                let l = p.to_lowercase();
+                l.contains(r"\windowsapps\claude_") && l.ends_with(r"\app\claude.exe")
+            })
+        })
         .map(|(p, _)| p.clone())
 }
 
@@ -299,7 +306,7 @@ pub async fn claude_icon() -> Option<String> {
     static CACHE: Mutex<Option<Result<String, Instant>>> = Mutex::new(None);
     tauri::async_runtime::spawn_blocking(|| {
         let _com = crate::platform::ComGuard::new(COINIT_APARTMENTTHREADED);
-        let mut cache = CACHE.lock().unwrap();
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
         icon_cached(&mut cache, Instant::now(), || {
             let png = crate::windows_list::file_icon_png(&find_claude_exe()?)?;
             Some(format!("data:image/png;base64,{}", STANDARD.encode(png)))
@@ -442,6 +449,10 @@ mod tests {
         assert_eq!(pick_claude_exe(&c).as_deref(), Some(r"C:\Program Files\WindowsApps\Claude_1.0_x64__pzs8sxrjxfjjc\app\claude.exe"));
         assert_eq!(pick_claude_exe(&[(r"C:\x\notepad.exe".into(), true)]), None);
         assert_eq!(pick_claude_exe(&[(r"C:\x\Claude.exe".into(), false)]), None); // fără fereastră și nu e o cale cunoscută
+        // MSIX-ul Anthropic fără fereastră (doar în tray / proces ajutor): se acceptă după cale
+        let msix = r"C:\Program Files\WindowsApps\Claude_2.42304.0.0_x64__pzs8sxrjxfjjc\app\claude.exe";
+        assert_eq!(pick_claude_exe(&[(msix.into(), false)]).as_deref(), Some(msix));
+        assert_eq!(pick_claude_exe(&[(r"C:\Program Files\WindowsApps\Altceva_1.0\app\claude.exe".into(), false)]), None);
         // CLI-ul Claude Code nu are iconița aplicației, nici cu fereastră
         assert_eq!(pick_claude_exe(&[(r"C:\Users\A\AppData\Roaming\npm\claude.exe".into(), true)]), None);
         assert_eq!(pick_claude_exe(&[(r"C:\Users\A\.local\bin\claude.exe".into(), true)]), None);

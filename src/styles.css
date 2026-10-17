@@ -253,6 +253,7 @@ body.no-apps .apps { display: none; }
 .claude-item img { width: 13px; height: 13px; flex: none; border-radius: 3px; }
 .claude-item.working svg, .claude-item.working img { animation: pulse 1.4s ease-in-out infinite; }
 .claude-item.waiting svg, .claude-item.waiting .st { color: var(--orange); }
+.claude-item.waiting img, #bubble[data-kind="claude-waiting"] #b-claude img, #compact[data-kind="claude-waiting"] .c-claude .c-icon img { box-shadow: 0 0 0 1.5px var(--orange); }
 @keyframes claude-in { from { opacity: 0; filter: blur(6px); transform: scale(.94); } }
 .cal-row { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; }
 .cal-row[hidden] { display: none; }

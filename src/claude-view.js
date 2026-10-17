@@ -16,9 +16,11 @@ export function init(island) {
   };
   const pillAndBubble = () => { fill($('c-claude-icon')); fill($('b-claude')); };
   let loadingIcon = false;
+  let lastTry = -Infinity;
   function loadIcon() {
-    if (img || loadingIcon || !tauri) return; // lipsa se reîncearcă din Rust cel mult la 60 s
+    if (img || loadingIcon || !tauri || performance.now() - lastTry < 60_000) return; // lipsa: cel mult o dată pe minut
     loadingIcon = true;
+    lastTry = performance.now();
     invoke('claude_icon').then((url) => {
       if (!url) return;
       img = url;

@@ -132,10 +132,15 @@ function activeLayout() {
 }
 
 // Acasă: media/ceasul rămân sus, restul se derulează în spațiul rămas până la plafonul de 330 px
+let fitRaf = 0, fitMh = '';
 function fitScroll() {
   const rest = expandedEl.offsetHeight - scrollEl.offsetHeight; // tab-uri + sus + padding, fără containerul derulabil
-  scrollEl.style.maxHeight = `${Math.max(80, 328 - rest)}px`;
+  const mh = `${Math.max(80, 328 - rest)}px`;
   fadeScroll();
+  // scrisul se face în rAF: o schimbare de înălțime chiar în callback-ul ResizeObserver dă „loop completed with undelivered notifications”
+  fitMh = mh;
+  if (mh === scrollEl.style.maxHeight || fitRaf) return;
+  fitRaf = requestAnimationFrame(() => { fitRaf = 0; scrollEl.style.maxHeight = fitMh; fadeScroll(); });
 }
 // estompare jos cât mai e conținut ascuns dedesubt
 function fadeScroll() {

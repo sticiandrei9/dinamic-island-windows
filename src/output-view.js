@@ -43,6 +43,7 @@ export function init(island) {
     list.hidden = !list.hidden;
     row.classList.toggle('open', !list.hidden);
     island.refresh();
+    if (!list.hidden) list.scrollIntoView({ block: 'nearest' }); // să nu rămână sub estomparea containerului derulabil
   });
   window.addEventListener('home-show', () => { close(); refresh(); });
   window.addEventListener('island-settings', (e) => { enabled = e.detail.modules.output !== false; render(); });

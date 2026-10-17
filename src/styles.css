@@ -189,6 +189,7 @@ body.transient #transient[data-kind="ci"] { pointer-events: auto; }
   transition: opacity .16s ease, filter .16s ease, transform .2s ease;
 }
 body[data-tab="home"]:not(.has-media) #expanded { width: 360px; }
+body[data-tab="home"] #expanded { padding-bottom: 10px; } /* + 4 px din #x-scroll = aceeași înălțime totală */
 body[data-tab="timer"] #expanded { width: 380px; }
 body[data-tab="shelf"] #expanded { width: 440px; }
 body[data-tab="mirror"] #expanded { width: 360px; }
@@ -215,7 +216,7 @@ body.expanded #expanded {
 .pane.on { display: block; animation: pane-in .35s ease; }
 @keyframes pane-in { from { opacity: 0; filter: blur(6px); transform: translateY(4px); } }
 /* tot ce e sub media/ceas în Acasă: se derulează cu rotița când nu încape (max-height din island.js) */
-#x-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+#x-scroll { padding-bottom: 4px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 #x-scroll::-webkit-scrollbar { display: none; }
 #x-scroll.more-below { -webkit-mask-image: linear-gradient(#000 calc(100% - 22px), transparent); mask-image: linear-gradient(#000 calc(100% - 22px), transparent); }
 

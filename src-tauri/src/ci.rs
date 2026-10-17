@@ -27,6 +27,8 @@ pub struct Run {
     pub url: String,
     /// secunde Unix; doar la cele terminate
     pub finished_at: Option<u64>,
+    /// o rulare repornită (re-run) păstrează `id`-ul și crește încercarea
+    pub run_attempt: u64,
 }
 
 #[derive(Serialize)]
@@ -127,6 +129,7 @@ pub fn parse_runs_at(json: &str, project: &str, now: u64) -> Result<Vec<Run>, St
                 state: state.into(),
                 url: r.get("html_url")?.as_str()?.into(),
                 finished_at: if state == "running" { None } else { r.get("updated_at").and_then(|u| u.as_str()).and_then(parse_iso) },
+                run_attempt: r.get("run_attempt").and_then(|a| a.as_u64()).unwrap_or(1),
             })
         })
         .collect())
@@ -138,7 +141,8 @@ pub fn parse_runs_at(json: &str, project: &str, now: u64) -> Result<Vec<Run>, St
 pub fn transitions(prev: &[Run], cur: &[Run], since: u64) -> Vec<(Run, &'static str)> {
     cur.iter()
         .filter_map(|r| {
-            let was = prev.iter().find(|p| p.source == r.source && p.id == r.id).map(|p| p.state == "running");
+            // o altă încercare a aceleiași rulări (re-run) e o rulare nouă
+            let was = prev.iter().find(|p| p.source == r.source && p.id == r.id && p.run_attempt == r.run_attempt).map(|p| p.state == "running");
             let done = if r.state == "ok" { "ok" } else { "failed" };
             let kind = match (r.state == "running", was) {
                 (true, None) => "started",
@@ -169,7 +173,7 @@ pub fn active_repos(json: &str, now: u64) -> Vec<String> {
 fn first_time(announced: &mut VecDeque<String>, found: Vec<(Run, &'static str)>) -> Vec<(Run, &'static str)> {
     let mut out = Vec::new();
     for (run, kind) in found {
-        let key = format!("{}:{}", run.source, run.id);
+        let key = format!("{}:{}:{}", run.source, run.id, run.run_attempt);
         if kind != "started" {
             if announced.contains(&key) {
                 continue;
@@ -368,6 +372,9 @@ impl Poller {
                 Err(e) if self.repos.is_empty() => return Err(e),
                 Err(_) => {}
             }
+            if !self.gh_ok {
+                return Err("gh indisponibil".into()); // pierdut sau neautentificat: nu mai încercăm repo-urile
+            }
         }
         let full = self.full_at.is_none_or(|t| now.saturating_sub(t) >= FULL_EVERY);
         let (mut all, mut polled, mut failed) = (Vec::new(), 0, 0);
@@ -378,6 +385,9 @@ impl Poller {
                 all.extend(before);
                 continue;
             }
+            if !self.gh_ok {
+                break;
+            }
             polled += 1;
             match self.gh(&["api", &format!("/repos/{full_name}/actions/runs?per_page=5")]).and_then(|j| parse_runs(&j, &project)) {
                 Ok(runs) => all.extend(runs),
@@ -386,6 +396,9 @@ impl Poller {
                     all.extend(before);
                 }
             }
+        }
+        if !self.gh_ok {
+            return Err("gh indisponibil".into());
         }
         if full {
             self.full_at = Some(now);
@@ -443,6 +456,7 @@ pub fn spawn(app: AppHandle) {
         let mut p = Poller::default();
         loop {
             if !enabled(&app) {
+                *LOGIN.lock().unwrap() = None;
                 if std::mem::take(&mut p.active) && !p.shown.is_empty() {
                     CURRENT.lock().unwrap().clear();
                     let _ = app.emit("ci", Vec::<Run>::new());
@@ -477,6 +491,7 @@ mod tests {
             state: state.into(),
             url: format!("https://github.com/o/p/actions/runs/{id}"),
             finished_at,
+            run_attempt: 1,
         }
     }
 
@@ -603,6 +618,30 @@ mod tests {
         }
         assert!(seen.len() <= ANNOUNCED_KEEP);
         assert_eq!(first_time(&mut seen, vec![(r, "ok")]).len(), 1);
+    }
+
+    #[test]
+    fn re_run_cu_acelasi_id_se_anunta_din_nou() {
+        let first = run("11", "failed", Some(7000));
+        let mut again = run("11", "running", None);
+        again.run_attempt = 2;
+        let mut finished = run("11", "ok", Some(9000));
+        finished.run_attempt = 2;
+        // încercarea 2 pornește (același id), apoi se termină
+        assert_eq!(transitions(&[first.clone()], &[again.clone()], 5000), vec![(again.clone(), "started")]);
+        assert_eq!(transitions(&[again], &[finished.clone()], 5000), vec![(finished.clone(), "ok")]);
+        // terminată între două verificări: tot se anunță
+        assert_eq!(transitions(&[first.clone()], &[finished.clone()], 5000), vec![(finished.clone(), "ok")]);
+        // ambele încercări se anunță o dată fiecare, nu de două ori
+        let mut seen = VecDeque::new();
+        assert_eq!(first_time(&mut seen, vec![(first.clone(), "failed")]).len(), 1);
+        assert_eq!(first_time(&mut seen, vec![(finished.clone(), "ok")]).len(), 1);
+        assert!(first_time(&mut seen, vec![(first, "failed")]).is_empty());
+        assert!(first_time(&mut seen, vec![(finished, "ok")]).is_empty());
+        // încercarea vine din API, implicit 1
+        let json = r#"{"workflow_runs":[{"id":1,"name":"W","status":"in_progress","html_url":"https://x","run_attempt":3},{"id":2,"name":"W","status":"in_progress","html_url":"https://x"}]}"#;
+        let runs = parse_runs_at(json, "p", 0).unwrap();
+        assert_eq!((runs[0].run_attempt, runs[1].run_attempt), (3, 1));
     }
 
     #[test]

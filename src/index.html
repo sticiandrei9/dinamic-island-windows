@@ -35,6 +35,10 @@
         <b id="c-download-name"></b>
         <span id="c-download-info"></span>
       </div>
+      <div class="c-slot c-ci">
+        <svg class="d-ring" viewBox="0 0 24 24" aria-hidden="true"><circle class="bg" cx="12" cy="12" r="9" /><circle class="fg" cx="12" cy="12" r="9" /></svg>
+        <span class="c-ci-text" id="c-ci-text"></span>
+      </div>
       <div class="c-slot c-sleep">
         <span class="c-icon" id="c-sleep-icon"></span>
         <span class="c-time" id="c-sleep-text"></span>
@@ -124,9 +128,13 @@
           </div>
         </section>
         <section id="x-clock">
-          <div id="x-time" class="clock-time"></div>
-          <div id="x-date" class="clock-date"></div>
+          <div class="clock-main">
+            <div id="x-time" class="clock-time"></div>
+            <div id="x-date" class="clock-date"></div>
+          </div>
+          <div id="x-batteries" class="batteries"></div>
         </section>
+        <div id="x-controls" class="controls-grid" hidden></div>
         <div id="x-cal" class="cal-row" hidden></div>
         <div id="x-claude" class="claude-row" hidden></div>
         <div id="x-privacy" class="privacy-row" hidden></div>

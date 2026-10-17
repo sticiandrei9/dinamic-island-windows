@@ -109,3 +109,9 @@ test('prioritățile modulelor noi', () => {
   assert.equal(layout([k('sleep'), k('media')]).bubble.kind, 'sleep');
   assert.equal(layout([k('timer'), k('download')]).pill.kind, 'timer');
 });
+
+test('prioritatea CI', () => {
+  const k = (kind) => ({ id: kind, kind });
+  assert.equal(layout([k('media'), k('ci')]).pill.kind, 'ci');
+  assert.equal(layout([k('download'), k('ci')]).pill.kind, 'download');
+});

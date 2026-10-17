@@ -41,6 +41,10 @@ pub struct Modules {
     pub clipboard: bool,
     pub sleep: bool,
     pub notes: bool,
+    pub visualizer: bool,
+    pub controls: bool,
+    pub ci: bool,
+    pub batteries: bool,
 }
 
 impl Default for Modules {
@@ -50,6 +54,7 @@ impl Default for Modules {
             alerts: true, volume: true, notifications: true, calls: true, screenshots: true, shelf: true, mirror: true,
             keyboard: true, network: true, output: true, calendar: true,
             claude: false, downloads: true, unlock: true, system: true, clipboard: false, sleep: true, notes: true,
+            visualizer: true, controls: true, ci: false, batteries: true,
         }
     }
 }
@@ -114,6 +119,12 @@ pub struct Settings {
     /// scurtătura care deschide notițele; goală = niciuna (sugestia din Setări: Win+Shift+N)
     #[serde(deserialize_with = "lenient")]
     pub notes_hotkey: String,
+    /// tokenul API Cloudflare (doar citire, Workers/Pages); gol = fără build-uri Cloudflare; nu se loghează
+    #[serde(deserialize_with = "lenient")]
+    pub cloudflare_token: String,
+    /// ID-ul contului Cloudflare; gol = se ia din token
+    #[serde(deserialize_with = "lenient")]
+    pub cloudflare_account: String,
 }
 
 impl Default for Settings {
@@ -131,6 +142,8 @@ impl Default for Settings {
             shelf_days: 0,
             calendar_url: String::new(),
             notes_hotkey: String::new(),
+            cloudflare_token: String::new(),
+            cloudflare_account: String::new(),
         }
     }
 }
@@ -369,6 +382,14 @@ mod tests {
         assert!(!m.claude && !m.clipboard);
         assert!(m.downloads && m.unlock && m.system && m.sleep && m.notes);
         assert!(Settings::default().notes_hotkey.is_empty());
+    }
+
+    #[test]
+    fn module_v060_implicite() {
+        let s = Settings::default();
+        assert!(s.modules.visualizer && s.modules.controls && s.modules.batteries);
+        assert!(!s.modules.ci);
+        assert!(s.cloudflare_token.is_empty() && s.cloudflare_account.is_empty());
     }
 
     #[test]

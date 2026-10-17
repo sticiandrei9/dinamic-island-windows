@@ -285,8 +285,9 @@ body.no-apps .apps { display: none; }
 .controls svg { height: 17px; fill: currentColor; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
 #x-play svg { height: 22px; stroke-width: 0; }
 
-#x-clock { display: none; text-align: center; padding-top: 2px; }
-body:not(.has-media) #x-clock { display: block; }
+#x-clock { display: none; align-items: center; justify-content: center; text-align: center; padding-top: 2px; }
+body:not(.has-media) #x-clock { display: flex; }
+#x-batteries:empty { display: none; }
 body:not(.has-media) #x-media { display: none; }
 .clock-time { font-size: 30px; font-weight: 600; letter-spacing: -.6px; font-variant-numeric: tabular-nums; }
 .clock-date { font-size: 12px; color: var(--fg2); margin-top: 2px; }

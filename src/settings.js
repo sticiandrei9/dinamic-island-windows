@@ -4,7 +4,7 @@ import { t, setLang, applyStatic } from './lib/i18n.js';
 const tauri = window.__TAURI__;
 const invoke = tauri.core.invoke;
 
-const MODULES = ['media', 'lyrics', 'apps', 'output', 'timer', 'calendar', 'privacy', 'calls', 'alerts', 'network', 'keyboard', 'volume', 'notifications', 'screenshots', 'downloads', 'clipboard', 'unlock', 'system', 'sleep', 'notes', 'claude', 'shelf', 'mirror'];
+const MODULES = ['media', 'lyrics', 'apps', 'output', 'timer', 'calendar', 'privacy', 'calls', 'alerts', 'network', 'keyboard', 'volume', 'notifications', 'screenshots', 'downloads', 'clipboard', 'unlock', 'system', 'sleep', 'notes', 'visualizer', 'controls', 'batteries', 'ci', 'claude', 'shelf', 'mirror'];
 const SHELF_DAYS = [0, 1, 7, 30];
 
 let settings = null;

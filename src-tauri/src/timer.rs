@@ -264,9 +264,19 @@ fn abandon_volume() {
 /// La ieșirea din aplicație (închidere din tray, updater) în timpul fade-ului sau al pauzei: volumul revine.
 /// Pe un thread propriu (COM MTA), ca endpoint-ul creat în MTA să nu fie apelat din thread-ul principal STA.
 pub fn restore_on_exit() {
-    if ACTIVE.lock().unwrap().is_some() {
-        let _ = std::thread::spawn(restore_volume).join();
+    if ACTIVE.lock().unwrap().is_some() && !run_for(restore_volume, Duration::from_secs(2)) {
+        log::warn!("timer de somn: volumul nu a revenit la ieșire (driverul nu răspunde)");
     }
+}
+
+/// Rulează `f` pe un thread nou și o așteaptă cel mult `timeout`; false = n-a terminat la timp (thread-ul rămâne).
+fn run_for(f: impl FnOnce() + Send + 'static, timeout: Duration) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        f();
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(timeout).is_ok()
 }
 
 /// Anulează somnul din ceas (utilizatorul a schimbat volumul sau modulul a fost oprit).
@@ -533,6 +543,15 @@ mod tests {
         assert_eq!(c.sleep.as_ref().unwrap().ends_at, 1_800_000);
         c.sleep_cancel();
         assert!(c.sleep.is_none());
+    }
+
+    #[test]
+    fn asteptare_limitata_la_iesire() {
+        assert!(run_for(|| {}, Duration::from_secs(1)));
+        // un driver blocat nu ține ieșirea pe loc
+        let t = Instant::now();
+        assert!(!run_for(|| std::thread::sleep(Duration::from_secs(5)), Duration::from_millis(50)));
+        assert!(t.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

@@ -282,7 +282,19 @@
     "settings.cfAccountHint": "Din panou: Workers & Pages → Account ID (32 de litere și cifre). Fără ambele câmpuri, Cloudflare nu e urmărit.",
     "settings.cfCheck": "Verifică",
     "settings.cfOk": "Merge ({v}).",
-    "settings.cfError": "Nu merge: {v}."
+    "settings.cfError": "Nu merge: {v}.",
+    "settings.ciCfBudget": "Cloudflare: pauză, 1000 de apeluri în ultima oră.",
+    "settings.cfErr.unauthorized": "Cloudflare a respins tokenul (invalid, expirat sau de cont; Workers cer un token de utilizator)",
+    "settings.cfErr.forbidden": "tokenul nu are dreptul de citire pentru {v}",
+    "settings.cfErr.account_not_found": "contul nu a fost găsit: verifică ID-ul contului",
+    "settings.cfErr.network": "Cloudflare nu răspunde",
+    "settings.cfErr.bad_response": "răspuns neașteptat de la Cloudflare",
+    "settings.cfErr.rate_limited": "prea multe cereri către Cloudflare",
+    "settings.cfErr.http": "Cloudflare a răspuns cu HTTP {v}",
+    "settings.cfErr.not_configured": "completează tokenul și ID-ul contului (doar litere și cifre)",
+    "settings.cfErr.budget": "pauză: 1000 de apeluri Cloudflare în ultima oră",
+    "settings.cfErr.internal": "eroare internă",
+    "settings.cfErr.other": "{v}"
   },
   "en": {
     "tab.home": "Home",
@@ -559,7 +571,19 @@
     "settings.cfAccountHint": "From the dashboard: Workers & Pages → Account ID (32 letters and digits). Without both fields Cloudflare is not watched.",
     "settings.cfCheck": "Check",
     "settings.cfOk": "Works ({v}).",
-    "settings.cfError": "Does not work: {v}."
+    "settings.cfError": "Does not work: {v}.",
+    "settings.ciCfBudget": "Cloudflare: paused, 1000 calls used in the last hour.",
+    "settings.cfErr.unauthorized": "Cloudflare rejected the token (invalid, expired or an account token; Workers need a user token)",
+    "settings.cfErr.forbidden": "the token has no read permission for {v}",
+    "settings.cfErr.account_not_found": "account not found: check the account ID",
+    "settings.cfErr.network": "Cloudflare is not responding",
+    "settings.cfErr.bad_response": "unexpected response from Cloudflare",
+    "settings.cfErr.rate_limited": "too many requests to Cloudflare",
+    "settings.cfErr.http": "Cloudflare answered with HTTP {v}",
+    "settings.cfErr.not_configured": "fill in the token and the account ID (letters and digits only)",
+    "settings.cfErr.budget": "paused: 1000 Cloudflare calls used in the last hour",
+    "settings.cfErr.internal": "internal error",
+    "settings.cfErr.other": "{v}"
   },
   "ru": {
     "tab.home": "Главная",
@@ -852,6 +876,18 @@
     "settings.cfAccountHint": "В панели: Workers & Pages → Account ID (32 буквы и цифры). Без обоих полей Cloudflare не отслеживается.",
     "settings.cfCheck": "Проверить",
     "settings.cfOk": "Работает ({v}).",
-    "settings.cfError": "Не работает: {v}."
+    "settings.cfError": "Не работает: {v}.",
+    "settings.ciCfBudget": "Cloudflare: пауза, за последний час использовано 1000 вызовов.",
+    "settings.cfErr.unauthorized": "Cloudflare отклонил токен (недействителен, истёк или токен аккаунта; для Workers нужен токен пользователя)",
+    "settings.cfErr.forbidden": "у токена нет права чтения для {v}",
+    "settings.cfErr.account_not_found": "аккаунт не найден: проверьте ID аккаунта",
+    "settings.cfErr.network": "Cloudflare не отвечает",
+    "settings.cfErr.bad_response": "неожиданный ответ Cloudflare",
+    "settings.cfErr.rate_limited": "слишком много запросов к Cloudflare",
+    "settings.cfErr.http": "Cloudflare ответил HTTP {v}",
+    "settings.cfErr.not_configured": "заполните токен и ID аккаунта (только буквы и цифры)",
+    "settings.cfErr.budget": "пауза: за последний час использовано 1000 вызовов Cloudflare",
+    "settings.cfErr.internal": "внутренняя ошибка",
+    "settings.cfErr.other": "{v}"
   }
 }

@@ -38,6 +38,8 @@ pub struct CiStatus {
     pub gh: &'static str,
     pub user: Option<String>,
     pub budget_paused: bool,
+    /// Cloudflare are bugetul lui, oprit separat
+    pub cf_budget_paused: bool,
 }
 
 const HOUR: u64 = 3600;
@@ -222,13 +224,20 @@ const CF_DASH: &str = "https://dash.cloudflare.com/?to=/:account";
 /// Cel mult atâtea proiecte Pages și atâtea Workers urmărite (apeluri/oră: fiecare costă ~60).
 const CF_MAX: usize = 3;
 
-/// `result` din răspuns; `success: false` sau alt corp e eroare, iar textul serverului nu ajunge în mesaj.
+/// O rulare în coadă sau inactivă de mai mult de atât probabil nu mai pornește: nu mai e „în curs”.
+const CF_STUCK: u64 = 1800;
+/// Un proiect fără build în ultima oră se verifică doar la atât.
+const CF_IDLE_EVERY: u64 = 120;
+
+/// `result` din răspuns; `success: false` sau alt corp e eroare `bad_response` (codurile se traduc în Setări);
+/// textul serverului nu ajunge în mesaj.
 fn cf_list(json: &str) -> Result<Vec<serde_json::Value>, String> {
-    let v: serde_json::Value = serde_json::from_str(json).map_err(|_| "răspuns care nu e JSON".to_string())?;
+    let bad = || "bad_response".to_string();
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|_| bad())?;
     if v.get("success").and_then(|s| s.as_bool()) == Some(false) {
-        return Err("Cloudflare a refuzat cererea".into());
+        return Err(bad());
     }
-    v.get("result").and_then(|r| r.as_array()).cloned().ok_or_else(|| "răspuns fără result".to_string())
+    v.get("result").and_then(|r| r.as_array()).cloned().ok_or_else(bad)
 }
 
 fn cf_time(v: &serde_json::Value, key: &str) -> Option<u64> {
@@ -241,8 +250,14 @@ fn cf_safe(s: &str) -> bool {
 }
 
 /// Deployment-urile unui proiect Pages (`result[]` din `…/pages/projects/{p}/deployments`). În curs = orice
-/// etapă care nu e încheiată (`deploy` + `success`); `failure` = eșuat; `canceled`, `skipped` și cele sărite nu dau nimic.
+/// etapă care nu e încheiată (`deploy` + `success`); `failure` = eșuat; `canceled`, `skipped` și cele sărite nu dau nimic;
+/// unul în coadă / inactiv de peste 30 de minute nu mai e „în curs”.
 pub fn parse_pages(json: &str, project: &str) -> Result<Vec<Run>, String> {
+    parse_pages_at(json, project, now_s())
+}
+
+/// Ca `parse_pages`, cu momentul curent dat (pentru teste).
+pub fn parse_pages_at(json: &str, project: &str, now: u64) -> Result<Vec<Run>, String> {
     Ok(cf_list(json)?
         .iter()
         .filter_map(|d| {
@@ -251,10 +266,12 @@ pub fn parse_pages(json: &str, project: &str) -> Result<Vec<Run>, String> {
             }
             let id = d.get("id")?.as_str()?;
             let stage = d.get("latest_stage")?;
-            let state = match (stage.get("name")?.as_str()?, stage.get("status")?.as_str()?) {
+            let (name, status) = (stage.get("name")?.as_str()?, stage.get("status")?.as_str()?);
+            let state = match (name, status) {
                 (_, "canceled" | "skipped") => return None,
                 (_, "failure") => "failed",
                 ("deploy", "success") => "ok",
+                ("queued", _) | (_, "idle") if cf_time(d, "created_on").is_some_and(|c| now.saturating_sub(c) > CF_STUCK) => return None,
                 _ => "running",
             };
             // reușit: site-ul; altfel jurnalul build-ului din panou
@@ -274,13 +291,20 @@ pub fn parse_pages(json: &str, project: &str) -> Result<Vec<Run>, String> {
 }
 
 /// Build-urile unui Worker (`result[]` din `…/builds/workers/{tag}/builds`). În curs = `queued`, `initializing`,
-/// `running`; `stopped` e reușit (`success`) sau eșuat (`fail`, `terminated`); `skipped` și `cancelled` nu dau nimic.
+/// `running`; `stopped` e reușit (`success`) sau eșuat (`fail`, `terminated`); `skipped` și `cancelled` nu dau nimic;
+/// unul `queued` de peste 30 de minute nu mai e „în curs”.
 pub fn parse_worker_builds(json: &str, project: &str) -> Result<Vec<Run>, String> {
+    parse_worker_builds_at(json, project, now_s())
+}
+
+/// Ca `parse_worker_builds`, cu momentul curent dat (pentru teste).
+pub fn parse_worker_builds_at(json: &str, project: &str, now: u64) -> Result<Vec<Run>, String> {
     Ok(cf_list(json)?
         .iter()
         .filter_map(|b| {
             let id = b.get("build_uuid")?.as_str()?;
             let state = match (b.get("status")?.as_str()?, b.get("build_outcome").and_then(|o| o.as_str())) {
+                ("queued", _) if cf_time(b, "created_on").is_some_and(|c| now.saturating_sub(c) > CF_STUCK) => return None,
                 ("queued" | "initializing" | "running", _) => "running",
                 ("stopped", Some("success")) => "ok",
                 ("stopped", Some("fail" | "terminated")) => "failed",
@@ -332,16 +356,41 @@ fn cf_recent_workers(json: &str) -> Vec<(String, String)> {
     found.into_iter().take(CF_MAX).map(|(_, n, t)| (n, t)).collect()
 }
 
-/// Mesaj scurt pentru un cod HTTP de la Cloudflare; `need` = dreptul de citire necesar apelului.
+/// Codul unei erori HTTP de la Cloudflare, tradus în Setări (`unauthorized`, `forbidden:<dreptul>`,
+/// `account_not_found`, `rate_limited`, `http:<cod>`); `need` = dreptul de citire necesar apelului.
 /// Fără token, fără adrese, fără textul serverului.
 fn cf_error(code: u16, need: &str) -> String {
     match code {
-        401 => "tokenul e respins de Cloudflare (invalid, expirat sau de cont: Workers cer unul de utilizator)".into(),
-        403 => format!("tokenul nu are dreptul de citire pentru {need}"),
-        404 => "contul nu a fost găsit: verifică ID-ul contului".into(),
-        429 => "prea multe cereri către Cloudflare".into(),
-        _ => format!("Cloudflare a răspuns cu HTTP {code}"),
+        401 => "unauthorized".into(),
+        403 => format!("forbidden:{need}"),
+        404 => "account_not_found".into(),
+        429 => "rate_limited".into(),
+        _ => format!("http:{code}"),
     }
+}
+
+/// Când se verifică din nou un proiect: la fiecare ciclu cât are ceva în curs, la ~55 s dacă a avut un build
+/// în ultima oră, altfel la 120 s.
+fn cf_due(last: &[Run], polled_at: Option<u64>, now: u64) -> bool {
+    let Some(at) = polled_at else { return true };
+    let gap = if last.iter().any(|r| r.state == "running") {
+        0
+    } else if last.iter().any(|r| r.finished_at.is_some_and(|f| now.saturating_sub(f) < HOUR)) {
+        FULL_EVERY
+    } else {
+        CF_IDLE_EVERY
+    };
+    now.saturating_sub(at) >= gap
+}
+
+/// (GitHub oprit de plafon, Cloudflare oprit de plafon): fiecare sursă are bugetul ei.
+fn paused_flags(gh: &Budget, cf: &Budget, now: u64) -> (bool, bool) {
+    (!gh.ok(now), !cf.ok(now))
+}
+
+/// Cât așteptăm până reîncercăm `gh` după o eșuare: lipsa lui nu se schimbă de la sine (10 min), restul se reîncearcă la ciclu.
+fn gh_retry_after(kind: &str) -> u64 {
+    if kind == "missing" { 600 } else { 0 }
 }
 
 /// Cloudflare merge doar cu ambele câmpuri; ID-ul contului intră în adresă, deci doar litere și cifre.
@@ -417,8 +466,9 @@ fn run_gh(args: &[&str]) -> Result<String, &'static str> {
     }
 }
 
-/// Plafonul de apeluri e comun buclei și Setărilor.
+/// Plafonul de apeluri e comun buclei și Setărilor; GitHub și Cloudflare au câte unul.
 static BUDGET: Mutex<Budget> = Mutex::new(Budget::new());
+static CF_BUDGET: Mutex<Budget> = Mutex::new(Budget::new());
 
 /// Un apel numărat în buget.
 fn call(args: &[&str]) -> Result<String, &'static str> {
@@ -442,19 +492,20 @@ fn check_user() -> Result<String, &'static str> {
 /// Starea pentru Setări. La plafon nu se cheamă `gh`; altfel `gh` se cheamă doar cât bucla n-a aflat încă contul.
 pub fn status_now() -> CiStatus {
     let known = LOGIN.lock().unwrap().clone();
-    if !BUDGET.lock().unwrap().ok(now_s()) {
-        return CiStatus { gh: if known.is_some() { "ok" } else { "error" }, user: known, budget_paused: true };
+    let (budget_paused, cf_budget_paused) = paused_flags(&BUDGET.lock().unwrap(), &CF_BUDGET.lock().unwrap(), now_s());
+    if budget_paused {
+        return CiStatus { gh: if known.is_some() { "ok" } else { "error" }, user: known, budget_paused, cf_budget_paused };
     }
     let (gh, user) = match known.map(Ok).unwrap_or_else(check_user) {
         Ok(u) => ("ok", Some(u)),
         Err(kind) => (kind, None),
     };
-    CiStatus { gh, user, budget_paused: false }
+    CiStatus { gh, user, budget_paused, cf_budget_paused }
 }
 
 #[tauri::command]
 pub async fn ci_status() -> CiStatus {
-    tauri::async_runtime::spawn_blocking(status_now).await.unwrap_or(CiStatus { gh: "error", user: None, budget_paused: false })
+    tauri::async_runtime::spawn_blocking(status_now).await.unwrap_or(CiStatus { gh: "error", user: None, budget_paused: false, cf_budget_paused: false })
 }
 
 #[tauri::command]
@@ -489,40 +540,47 @@ impl Cf {
     }
 }
 
-/// `GET` către Cloudflare (numărat în buget). Erorile sunt mesaje scurte: nici tokenul, nici adresa, nici textul serverului.
+/// `GET` către Cloudflare (numărat în bugetul Cloudflare). Erorile sunt coduri scurte pe care Setările le traduc:
+/// nici tokenul, nici adresa, nici textul serverului (vezi `cf_error`; în plus `budget`, `network`, `bad_response`).
 fn cf_get(cf: &Cf, path: &str, need: &str) -> Result<String, String> {
     {
-        let mut b = BUDGET.lock().unwrap();
+        let mut b = CF_BUDGET.lock().unwrap();
         if !b.ok(now_s()) {
-            return Err("plafonul de apeluri".into());
+            return Err("budget".into());
         }
         b.record(now_s());
     }
     match ureq::get(&format!("{CF_API}{path}")).set("Authorization", &format!("Bearer {}", cf.token)).timeout(CF_TIMEOUT).call() {
-        Ok(r) => r.into_string().map_err(|_| "răspuns Cloudflare ilizibil".to_string()),
+        Ok(r) => r.into_string().map_err(|_| "bad_response".to_string()),
         Err(ureq::Error::Status(code, _)) => {
             log::warn!("ci: Cloudflare a răspuns {code}");
             Err(cf_error(code, need))
         }
-        Err(ureq::Error::Transport(_)) => Err("Cloudflare nu răspunde".into()),
+        Err(ureq::Error::Transport(_)) => Err("network".into()),
     }
 }
 
-/// „Verifică” din Setări: tokenul, apoi cele trei citiri de care are nevoie bucla. Ok = ce a găsit.
+/// „Verifică” din Setări: tokenul (de cont, apoi de utilizator), apoi cele trei citiri de care are nevoie bucla.
+/// Ok = ce a găsit; Err = un cod de eroare. Un Worker fără Workers Builds (404) nu e o eroare a tokenului.
 fn check_cloudflare(cf: &Cf) -> Result<String, String> {
-    cf_get(cf, "/user/tokens/verify", "User API Tokens")?;
+    cf_get(cf, &cf.acct("/tokens/verify"), "API Tokens").or_else(|_| cf_get(cf, "/user/tokens/verify", "API Tokens"))?;
     let pages = cf_list(&cf_get(cf, &cf.acct("/pages/projects?per_page=100"), PAGES_READ)?)?.len();
     let scripts = cf_list(&cf_get(cf, &cf.acct("/workers/scripts"), SCRIPTS_READ)?)?;
     if let Some(tag) = scripts.iter().find_map(|w| w.get("tag")?.as_str().filter(|t| cf_safe(t))) {
-        cf_get(cf, &cf.acct(&format!("/builds/workers/{tag}/builds?per_page=1")), CI_READ)?;
+        match cf_get(cf, &cf.acct(&format!("/builds/workers/{tag}/builds?per_page=1")), CI_READ) {
+            Err(e) if e == "account_not_found" => {}
+            other => {
+                other?;
+            }
+        }
     }
     Ok(format!("Pages: {pages} · Workers: {}", scripts.len()))
 }
 
 #[tauri::command]
 pub async fn ci_check_cloudflare(app: AppHandle) -> Result<String, String> {
-    let cf = Cf::from_settings(&app).ok_or("completează tokenul și ID-ul contului (doar litere și cifre)")?;
-    tauri::async_runtime::spawn_blocking(move || check_cloudflare(&cf)).await.map_err(|_| "eroare internă".to_string())?
+    let cf = Cf::from_settings(&app).ok_or("not_configured")?;
+    tauri::async_runtime::spawn_blocking(move || check_cloudflare(&cf)).await.map_err(|_| "internal".to_string())?
 }
 
 // ---------- bucla ----------
@@ -535,6 +593,11 @@ struct CfTarget {
     key: String,
     project: String,
     last: Vec<Run>,
+    polled_at: Option<u64>,
+    /// lista de build-uri a răspuns cel puțin o dată
+    seen: bool,
+    /// un Worker fără Workers Builds (404 la prima listare): sărit până la următoarea reîmprospătare a listei
+    unconfigured: bool,
 }
 
 #[derive(Default)]
@@ -543,6 +606,9 @@ struct Poller {
     since: u64,
     gh_ok: bool,
     paused: bool,
+    cf_was_paused: bool,
+    /// `gh` lipsește: nu-l mai căutăm la fiecare ciclu
+    gh_retry_at: u64,
     prev: Vec<Run>,
     shown: Vec<Run>,
     announced: VecDeque<String>,
@@ -554,7 +620,6 @@ struct Poller {
     cf_for: String,
     cf_targets: Vec<CfTarget>,
     cf_at: Option<u64>,
-    cf_full_at: Option<u64>,
 }
 
 impl Poller {
@@ -622,8 +687,8 @@ impl Poller {
         Ok(all)
     }
 
-    /// Build-urile Pages și Workers, cu același ritm ca GitHub: cele cu ceva în curs la fiecare ciclu (30 s),
-    /// restul cel mult la 55 s; lista proiectelor se reface la 2 min (și după o eșuare, nu la fiecare ciclu).
+    /// Build-urile Pages și Workers: cele cu ceva în curs la fiecare ciclu (30 s), cele cu un build în ultima oră
+    /// la ~55 s, restul la 120 s (`cf_due`); lista proiectelor se reface la 2 min (și după o eșuare, nu la fiecare ciclu).
     fn cloudflare(&mut self, now: u64, cf: &Cf) -> Result<Vec<Run>, String> {
         if self.cf_for != cf.account {
             self.cf_for = cf.account.clone();
@@ -648,20 +713,21 @@ impl Poller {
             for (worker, list) in found {
                 match list {
                     Ok(list) => self.cf_targets.extend(list.into_iter().map(|(key, project)| {
-                        let last = old.iter().find(|t| t.worker == worker && t.key == key).map(|t| t.last.clone()).unwrap_or_default();
-                        CfTarget { worker, key, project, last }
+                        // ce se știe despre proiect rămâne; un Worker marcat „fără Builds” e reîncercat
+                        let (last, polled_at, seen) = old.iter().find(|t| t.worker == worker && t.key == key).map(|t| (t.last.clone(), t.polled_at, t.seen)).unwrap_or_default();
+                        CfTarget { worker, key, project, last, polled_at, seen, unconfigured: false }
                     })),
-                    Err(_) => self.cf_targets.extend(old.iter().filter(|t| t.worker == worker).cloned()),
+                    Err(_) => self.cf_targets.extend(old.iter().filter(|t| t.worker == worker).cloned().map(|t| CfTarget { unconfigured: false, ..t })),
                 }
             }
         }
-        let full = self.cf_full_at.is_none_or(|t| now.saturating_sub(t) >= FULL_EVERY);
         let (mut all, mut polled, mut failed, mut last_err) = (Vec::new(), 0, 0, String::new());
         for t in &mut self.cf_targets {
-            if !full && !t.last.iter().any(|r| r.state == "running") {
+            if t.unconfigured || !cf_due(&t.last, t.polled_at, now) {
                 all.extend(t.last.clone());
                 continue;
             }
+            t.polled_at = Some(now);
             polled += 1;
             let (path, need) = if t.worker {
                 (cf.acct(&format!("/builds/workers/{}/builds?per_page=5", t.key)), CI_READ)
@@ -671,8 +737,15 @@ impl Poller {
             let res = cf_get(cf, &path, need).and_then(|j| if t.worker { parse_worker_builds(&j, &t.project) } else { parse_pages(&j, &t.project) });
             match res {
                 Ok(runs) => {
+                    t.seen = true;
                     t.last = runs.clone();
                     all.extend(runs);
+                }
+                // 404 la prima listare a unui Worker: nu are Workers Builds, nu mai e întrebat până la reîmprospătarea listei
+                Err(e) if t.worker && !t.seen && e == "account_not_found" => {
+                    t.unconfigured = true;
+                    polled -= 1;
+                    log::info!("ci: un Worker fără Workers Builds (builds_not_configured)");
                 }
                 Err(e) => {
                     failed += 1;
@@ -680,9 +753,6 @@ impl Poller {
                     all.extend(t.last.clone());
                 }
             }
-        }
-        if full {
-            self.cf_full_at = Some(now);
         }
         if polled > 0 && failed == polled {
             return Err(last_err);
@@ -692,30 +762,40 @@ impl Poller {
 
     /// O verificare; întoarce secundele până la următoarea.
     fn cycle(&mut self, app: &AppHandle) -> u64 {
-        let paused = !BUDGET.lock().unwrap().ok(now_s());
-        if paused != self.paused {
-            self.paused = paused;
-            log::warn!("ci: {}", if paused { "plafon de 1000 apeluri/oră atins, verificările se opresc" } else { "verificările reiau" });
-        }
-        if paused {
-            return 30;
-        }
-        if !self.gh_ok {
-            match check_user() {
-                Ok(_) => self.gh_ok = true,
-                Err(kind) => log::info!("ci: gh indisponibil ({kind})"),
+        let (paused, cf_paused) = paused_flags(&BUDGET.lock().unwrap(), &CF_BUDGET.lock().unwrap(), now_s());
+        for (flag, was, name) in [(paused, &mut self.paused, "GitHub"), (cf_paused, &mut self.cf_was_paused, "Cloudflare")] {
+            if flag != *was {
+                *was = flag;
+                log::warn!("ci: {name}: {}", if flag { "plafon de 1000 apeluri/oră atins, verificările se opresc" } else { "verificările reiau" });
             }
         }
-        let cf = Cf::from_settings(app);
-        if !self.gh_ok && cf.is_none() {
-            return 60;
+        let cf_cfg = Cf::from_settings(app);
+        let cf = cf_cfg.as_ref().filter(|_| !cf_paused);
+        if paused && cf.is_none() {
+            return 30;
         }
         let now = now_s();
-        // fără gh, rulările GitHub de data trecută rămân (Cloudflare merge și fără el)
-        let github = if self.gh_ok { self.github(now) } else { Ok(self.prev.iter().filter(|r| r.source == "github").cloned().collect()) };
+        if !paused && !self.gh_ok && now >= self.gh_retry_at {
+            match check_user() {
+                Ok(_) => self.gh_ok = true,
+                Err(kind) => {
+                    self.gh_retry_at = now + gh_retry_after(kind);
+                    log::info!("ci: gh indisponibil ({kind})");
+                }
+            }
+        }
+        let gh_live = self.gh_ok && !paused;
+        if !gh_live && cf.is_none() {
+            return 60;
+        }
+        // o sursă oprită (plafon, fără gh) își păstrează rulările de data trecută; Cloudflare merge și fără gh
+        let kept = |prev: &[Run], source: &str| -> Result<Vec<Run>, String> { Ok(prev.iter().filter(|r| r.source == source).cloned().collect()) };
+        let github = if gh_live { self.github(now) } else { kept(&self.prev, "github") };
         let mut fetched = vec![("github", github)];
-        if let Some(cf) = &cf {
+        if let Some(cf) = cf {
             fetched.push(("cloudflare", self.cloudflare(now, cf)));
+        } else if cf_cfg.is_some() {
+            fetched.push(("cloudflare", kept(&self.prev, "cloudflare")));
         }
         let cur = merge(&self.prev, fetched);
         for (run, kind) in first_time(&mut self.announced, transitions(&self.prev, &cur, self.since)) {
@@ -986,6 +1066,11 @@ mod tests {
         format!(r#"{{"success":true,"errors":[],"messages":[],"result":[{}],"result_info":{{"count":1,"page":1,"per_page":5,"total_count":1,"total_pages":1}}}}"#, deps.join(","))
     }
 
+    /// „Acum” pentru fixture-uri: la 10 minute după crearea lor (10:00).
+    fn cf_now() -> u64 {
+        parse_iso("2026-10-17T10:10:00Z").unwrap()
+    }
+
     fn states(runs: &[Run]) -> Vec<(&str, &str)> {
         runs.iter().map(|r| (r.id.as_str(), r.state.as_str())).collect()
     }
@@ -1004,14 +1089,14 @@ mod tests {
             pages_dep("i", "deploy", "skipped", ""),
             pages_dep("j", "deploy", "success", r#","is_skipped":true"#),
         ]);
-        let runs = parse_pages(&json, "site").unwrap();
+        let runs = parse_pages_at(&json, "site", cf_now()).unwrap();
         assert_eq!(states(&runs), vec![("a", "running"), ("b", "running"), ("c", "running"), ("d", "running"), ("e", "ok"), ("f", "failed"), ("g", "failed")]);
         assert!(runs.iter().all(|r| r.source == "cloudflare" && r.project == "site" && r.run_attempt == 1));
     }
 
     #[test]
     fn pages_campuri() {
-        let runs = parse_pages(&pages_json(&[pages_dep("e", "deploy", "success", ""), pages_dep("a", "build", "active", ""), pages_dep("f", "build", "failure", "")]), "site").unwrap();
+        let runs = parse_pages_at(&pages_json(&[pages_dep("e", "deploy", "success", ""), pages_dep("a", "build", "active", ""), pages_dep("f", "build", "failure", "")]), "site", cf_now()).unwrap();
         // în curs: fără sfârșit; terminat: modified_on (2026-10-17T10:05:00Z)
         assert_eq!((runs[0].finished_at, runs[1].finished_at, runs[2].finished_at), (Some(1_792_231_500), None, Some(1_792_231_500)));
         assert_eq!(runs[0].name, "main");
@@ -1061,7 +1146,7 @@ mod tests {
             build("c", "stopped", Some("cancelled")),
             build("n", "stopped", None),
         ]);
-        let runs = parse_worker_builds(&json, "api").unwrap();
+        let runs = parse_worker_builds_at(&json, "api", cf_now()).unwrap();
         assert_eq!(states(&runs), vec![("q", "running"), ("i", "running"), ("r", "running"), ("s", "ok"), ("f", "failed"), ("t", "failed")]);
         assert!(runs.iter().all(|r| r.source == "cloudflare" && r.project == "api" && r.run_attempt == 1 && r.name == "main"));
         assert_eq!(runs[0].finished_at, None);
@@ -1115,15 +1200,76 @@ mod tests {
     }
 
     #[test]
-    fn cloudflare_erori_fara_secrete() {
-        assert_eq!(cf_error(403, "Cloudflare Pages Read"), "tokenul nu are dreptul de citire pentru Cloudflare Pages Read");
-        assert!(cf_error(401, "x").contains("token"));
-        assert!(cf_error(404, "x").contains("cont"));
-        assert!(cf_error(500, "x").contains("500"));
-        for code in [401, 403, 404, 429, 500] {
-            let m = cf_error(code, "Workers CI Read");
-            assert!(!m.contains("http") && !m.contains("Bearer"), "{m}");
+    fn cloudflare_erori_ca_coduri() {
+        // codurile ajung în Setări și se traduc acolo; fără token, adrese sau textul serverului
+        assert_eq!(cf_error(403, "Cloudflare Pages Read"), "forbidden:Cloudflare Pages Read");
+        assert_eq!(cf_error(401, "x"), "unauthorized");
+        assert_eq!(cf_error(404, "x"), "account_not_found");
+        assert_eq!(cf_error(429, "x"), "rate_limited");
+        assert_eq!(cf_error(500, "x"), "http:500");
+        // JSON stricat / success:false → același cod, fără textul serverului
+        assert_eq!(parse_pages("nu e json", "p").unwrap_err(), "bad_response");
+        assert_eq!(parse_worker_builds(r#"{"success":false,"errors":[{"message":"Authentication error"}],"result":null}"#, "p").unwrap_err(), "bad_response");
+    }
+
+    #[test]
+    fn blocate_in_coada_nu_au_inel() {
+        let at = |mins: u64| parse_iso("2026-10-17T10:00:00Z").unwrap() + mins * 60; // create la 10:00
+        let st = |stage: &str, status: &str, now: u64| states_of(parse_pages_at(&pages_json(&[pages_dep("a", stage, status, "")]), "p", now).unwrap());
+        // proaspăt: în curs; de peste 30 de minute în coadă / inactiv: nu mai e „în curs”
+        assert_eq!(st("queued", "idle", at(20)), vec!["running"]);
+        assert!(st("queued", "idle", at(31)).is_empty());
+        assert!(st("build", "idle", at(120)).is_empty());
+        // un build care chiar lucrează rămâne în curs oricât durează
+        assert_eq!(st("build", "active", at(120)), vec!["running"]);
+        let w = |status: &str, now: u64| states_of(parse_worker_builds_at(&builds_json(&[build("b", status, None)]), "w", now).unwrap());
+        assert_eq!(w("queued", at(20)), vec!["running"]);
+        assert!(w("queued", at(31)).is_empty());
+        assert_eq!(w("running", at(120)), vec!["running"]);
+    }
+
+    fn states_of(runs: Vec<Run>) -> Vec<String> {
+        runs.into_iter().map(|r| r.state).collect()
+    }
+
+    #[test]
+    fn ritmul_proiectelor_cloudflare() {
+        let done = |ago: u64| run_at("1", "ok", Some(10_000 - ago));
+        let running = run_at("2", "running", None);
+        // niciodată verificat: acum
+        assert!(cf_due(&[], None, 10_000));
+        // cu ceva în curs: la fiecare ciclu
+        assert!(cf_due(&[running], Some(9_999), 10_000));
+        // terminat în ultima oră: ~55 s
+        assert!(!cf_due(&[done(600)], Some(9_950), 10_000));
+        assert!(cf_due(&[done(600)], Some(9_945), 10_000));
+        // nimic în ultima oră (sau nimic deloc): 120 s
+        assert!(!cf_due(&[done(7_200)], Some(9_900), 10_000));
+        assert!(cf_due(&[done(7_200)], Some(9_880), 10_000));
+        assert!(!cf_due(&[], Some(9_900), 10_000));
+    }
+
+    fn run_at(id: &str, state: &str, finished_at: Option<u64>) -> Run {
+        run(id, state, finished_at)
+    }
+
+    #[test]
+    fn bugete_separate_pe_surse() {
+        let (mut gh, cf) = (Budget::default(), Budget::default());
+        for i in 0..1000 {
+            gh.record(i);
         }
+        // GitHub a atins plafonul, Cloudflare nu: fiecare e oprit singur
+        assert_eq!(paused_flags(&gh, &cf, 1000), (true, false));
+        assert_eq!(paused_flags(&cf, &gh, 1000), (false, true));
+        assert_eq!(paused_flags(&gh, &gh, 1000), (true, true));
+    }
+
+    #[test]
+    fn gh_lipsa_se_reincearca_rar() {
+        assert_eq!(gh_retry_after("missing"), 600);
+        assert_eq!(gh_retry_after("unauthenticated"), 0);
+        assert_eq!(gh_retry_after("error"), 0);
     }
 
     #[test]

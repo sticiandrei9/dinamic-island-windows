@@ -11,8 +11,9 @@ let settings = null;
 let updateState = { kind: 'idle' };
 let version = '';
 
+let lastSave = Promise.resolve();
 function save() {
-  invoke('set_settings', { settings }).catch((e) => console.error(e));
+  lastSave = invoke('set_settings', { settings }).catch((e) => console.error(e));
 }
 
 function renderModules() {
@@ -81,19 +82,53 @@ function ciStatusRow() {
       const paused = st.budget_paused;
       small.className = st.gh === 'ok' && !paused ? '' : 'error';
       small.textContent = paused ? t('settings.ciBudget') : st.gh === 'ok' ? t('settings.ciOk', { user: st.user }) : t(`settings.ci${st.gh[0].toUpperCase()}${st.gh.slice(1)}`);
+      if (st.cf_budget_paused) { small.className = 'error'; small.textContent += ` ${t('settings.ciCfBudget')}`; }
     }).catch(() => { small.className = 'error'; small.textContent = t('settings.ciError'); });
   }
   return row;
 }
 
-// Cloudflare sub comutatorul CI: token (doar citire) + ID-ul contului; „Verifică” citește chiar acum ce folosește insula
-function cloudflareRows() {
+// Cloudflare sub comutatorul CI: token (doar citire) + ID-ul contului; „Verifică” citește chiar acum ce folosește insula.
+// Rândurile se construiesc o dată și se re-atașează la fiecare `renderModules` (același buton, același rezultat):
+// salvarea câmpului de la blur nu mai înlocuiește butonul între apăsare și click.
+let cfRows = null;
+const cfCheck = { busy: false, text: '', error: false, el: null, btn: null };
+
+// codurile de eroare ale lui Rust (`ci.rs`): `cod` sau `cod:parametru`
+const CF_ERRORS = ['unauthorized', 'forbidden', 'account_not_found', 'network', 'bad_response', 'rate_limited', 'http', 'not_configured', 'budget', 'internal'];
+function cfErrorText(code) {
+  const [kind, ...rest] = String(code).split(':');
+  return CF_ERRORS.includes(kind) ? t(`settings.cfErr.${kind}`, { v: rest.join(':') }) : t('settings.cfErr.other', { v: String(code) });
+}
+
+function paintCfCheck() {
+  if (!cfCheck.el) return;
+  cfCheck.el.className = cfCheck.error ? 'error' : '';
+  cfCheck.el.textContent = cfCheck.text;
+  cfCheck.btn.disabled = cfCheck.busy;
+}
+
+async function runCfCheck() {
+  Object.assign(cfCheck, { busy: true, error: false, text: '…' });
+  paintCfCheck();
+  await lastSave; // câmpul editat chiar acum e salvat de `change` (la blur); îl așteptăm, nu-l salvăm a doua oară
+  try {
+    cfCheck.text = t('settings.cfOk', { v: await invoke('ci_check_cloudflare') });
+  } catch (err) {
+    Object.assign(cfCheck, { error: true, text: t('settings.cfError', { v: cfErrorText(err) }) });
+  }
+  cfCheck.busy = false;
+  paintCfCheck();
+}
+
+function buildCloudflareRows() {
   const col = (key, type, labelKey, hint) => {
-    const row = Object.assign(document.createElement('div'), { className: 'row col', hidden: !settings.modules.ci });
+    const row = Object.assign(document.createElement('div'), { className: 'row col' });
     const label = document.createElement('div');
     label.className = 'label';
     label.append(Object.assign(document.createElement('span'), { textContent: t(labelKey) }), hint);
-    const input = Object.assign(document.createElement('input'), { type, value: settings[key] ?? '', spellcheck: false, autocomplete: 'off' });
+    const input = Object.assign(document.createElement('input'), { type, spellcheck: false, autocomplete: 'off' });
+    input.dataset.cf = key;
     input.addEventListener('change', () => { settings[key] = input.value.trim(); save(); });
     row.append(label, input);
     return row;
@@ -102,31 +137,30 @@ function cloudflareRows() {
   const link = Object.assign(document.createElement('a'), { href: '#', textContent: t('settings.cfTokenLink') });
   link.addEventListener('click', (e) => { e.preventDefault(); invoke('open_url', { url: 'https://dash.cloudflare.com/profile/api-tokens' }).catch(() => {}); });
   tokenHint.append(link);
-  const check = Object.assign(document.createElement('div'), { className: 'row', hidden: !settings.modules.ci });
-  const result = document.createElement('small');
+  const check = Object.assign(document.createElement('div'), { className: 'row' });
   const label = document.createElement('div');
   label.className = 'label';
-  label.append(result);
-  const btn = Object.assign(document.createElement('button'), { className: 'btn', textContent: t('settings.cfCheck') });
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    result.className = '';
-    result.textContent = '…';
-    await invoke('set_settings', { settings }).catch(() => {}); // câmpul editat acum a fost salvat de `change`, dar apelul poate fi încă în drum
-    try {
-      result.textContent = t('settings.cfOk', { v: await invoke('ci_check_cloudflare') });
-    } catch (err) {
-      result.className = 'error';
-      result.textContent = t('settings.cfError', { v: err });
-    }
-    btn.disabled = false;
-  });
-  check.append(label, btn);
+  cfCheck.el = document.createElement('small');
+  label.append(cfCheck.el);
+  cfCheck.btn = Object.assign(document.createElement('button'), { className: 'btn', textContent: t('settings.cfCheck') });
+  cfCheck.btn.addEventListener('click', runCfCheck);
+  check.append(label, cfCheck.btn);
+  paintCfCheck();
   return [
     col('cloudflare_token', 'password', 'settings.cfToken', tokenHint),
     col('cloudflare_account', 'text', 'settings.cfAccount', Object.assign(document.createElement('small'), { textContent: t('settings.cfAccountHint') })),
     check,
   ];
+}
+
+function cloudflareRows() {
+  cfRows ??= buildCloudflareRows();
+  for (const row of cfRows) {
+    row.hidden = !settings.modules.ci;
+    const input = row.querySelector('input');
+    if (input && document.activeElement !== input) input.value = settings[input.dataset.cf] ?? '';
+  }
+  return cfRows;
 }
 
 function renderControls() {
@@ -221,6 +255,7 @@ function renderShelfDays() {
 // limba: textele statice, cele generate și titlul ferestrei
 function applyLanguage() {
   setLang(settings.resolved_language ?? 'ro');
+  cfRows = null; // textele rândurilor Cloudflare se refac în limba nouă
   applyStatic();
   document.title = t('settings.title');
   document.getElementById('version').textContent = t('settings.version', { v: version });

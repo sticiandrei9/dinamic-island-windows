@@ -125,7 +125,8 @@ pub fn sync_windows(app: &AppHandle) {
             placed.insert(label.clone(), geom);
         }
         if fresh {
-            // până raportează interfața dreptunghiul insulei, fereastra nu blochează click-urile
+            // până raportează interfața dreptunghiul insulei, fereastra nu blochează click-urile; o singură dată:
+            // după aceea hittest comută doar WS_EX_TRANSPARENT (platform::set_click_through)
             let _ = win.set_ignore_cursor_events(true);
             platform::set_no_activate(&win, true);
             if let Some(&owner) = OWNER.get() {

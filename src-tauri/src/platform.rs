@@ -44,10 +44,30 @@ pub fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {
 
 /// `WS_EX_NOACTIVATE` pe insulă (click-urile n-o activează, deci nu fură focusul aplicației active) sau scos.
 /// Trece prin `set_focusable` al lui tao, nu prin `SetWindowLongPtrW`: tao recalculează tot stilul extins din
-/// steagurile lui la orice schimbare (de ex. `set_ignore_cursor_events`, care comută la fiecare intrare/ieșire
-/// a cursorului) și ar șterge un bit pus de mână. Stilul rămâne cel al ferestrei fără margini, deci fără bară de titlu.
+/// steagurile lui la orice schimbare (de ex. `set_ignore_cursor_events`) și ar șterge un bit pus de mână.
+/// Stilul rămâne cel al ferestrei fără margini, deci fără bară de titlu.
 pub fn set_no_activate(win: &WebviewWindow, on: bool) {
     let _ = win.set_focusable(!on);
+}
+
+/// Click-through al insulei: comută doar `WS_EX_TRANSPARENT`, direct pe HWND. `set_ignore_cursor_events` al lui tao
+/// trimite `SWP_FRAMECHANGED` la fiecare comutare și Windows pictează o clipă bara de titlu clasică (stilul tao păstrează
+/// `WS_CAPTION`). Tao rămâne pe „ignore” de la creare, deci `WS_EX_LAYERED` stă pus; dacă tao rescrie stilul
+/// (de ex. `set_focusable`), hittest repune bitul la următorul tic. Nu face nimic dacă bitul e deja cum trebuie.
+pub fn set_click_through(hwnd: isize, on: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, WS_EX_TRANSPARENT};
+    if hwnd == 0 {
+        return;
+    }
+    let h = HWND(hwnd as *mut core::ffi::c_void);
+    let bit = WS_EX_TRANSPARENT.0 as isize;
+    unsafe {
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        let want = if on { ex | bit } else { ex & !bit };
+        if want != ex {
+            SetWindowLongPtrW(h, GWL_EXSTYLE, want);
+        }
+    }
 }
 
 /// Dă insulei focusul de tastatură pentru câmpul de notițe: scoate `WS_EX_NOACTIVATE`, se atașează la

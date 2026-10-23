@@ -48,6 +48,8 @@ pub fn set_island_rect(window: WebviewWindow, state: tauri::State<IslandRects>, 
 struct WinState {
     inside: Option<bool>,
     hidden: bool,
+    /// luat o dată: `win.hwnd()` e un drum sincron până la firul principal
+    hwnd: Option<isize>,
     geo: (i32, i32, f64),
     geo_at: Option<Instant>,
     visible_sent: Option<Instant>,
@@ -79,6 +81,7 @@ pub fn spawn(app: AppHandle) {
 
             for (label, win) in windows {
                 let st = states.entry(label.clone()).or_default();
+                let hwnd = *st.hwnd.get_or_insert_with(|| platform::hwnd_of(&win).map_or(0, |h| h.0 as isize));
                 if st.geo_at.map_or(true, |t| t.elapsed() > Duration::from_secs(1)) {
                     if let (Ok(p), Ok(s)) = (win.outer_position(), win.scale_factor()) {
                         st.geo = (p.x, p.y, s);
@@ -96,7 +99,6 @@ pub fn spawn(app: AppHandle) {
                 if hidden != st.hidden {
                     st.hidden = hidden;
                     if hidden {
-                        let _ = win.set_ignore_cursor_events(true);
                         // cursorul putea fi pe insulă: interfața nu trebuie să creadă că e încă acolo
                         if st.inside == Some(true) {
                             let _ = app.emit_to(label.as_str(), "island-hover", false);
@@ -105,6 +107,7 @@ pub fn spawn(app: AppHandle) {
                     }
                 }
                 if hidden {
+                    platform::set_click_through(hwnd, true);
                     continue;
                 }
                 visible += 1;
@@ -115,9 +118,10 @@ pub fn spawn(app: AppHandle) {
                 let px = (cx - st.geo.0) as f64 / st.geo.2;
                 let py = (cy - st.geo.1) as f64 / st.geo.2;
                 let inside = point_in_rect(px, py, &scaled, 1.0);
+                // la fiecare tic, nu doar la schimbare: tao poate rescrie stilul (vezi set_click_through)
+                platform::set_click_through(hwnd, !inside);
                 if st.inside != Some(inside) {
                     st.inside = Some(inside);
-                    let _ = win.set_ignore_cursor_events(!inside);
                     if inside {
                         crate::shelf::ensure_drop_target(&win);
                     }

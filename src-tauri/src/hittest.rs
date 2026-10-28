@@ -50,6 +50,7 @@ struct WinState {
     hidden: bool,
     /// luat o dată: `win.hwnd()` e un drum sincron până la firul principal
     hwnd: Option<isize>,
+    top_at: Option<Instant>,
     geo: (i32, i32, f64),
     geo_at: Option<Instant>,
     visible_sent: Option<Instant>,
@@ -111,6 +112,12 @@ pub fn spawn(app: AppHandle) {
                     continue;
                 }
                 visible += 1;
+                if st.top_at.map_or(true, |t| t.elapsed() > Duration::from_secs(1)) {
+                    st.top_at = Some(Instant::now());
+                    if platform::keep_on_top(hwnd) {
+                        log::warn!("{label} ajunsese sub alte ferestre; readusă deasupra");
+                    }
+                }
 
                 let (Some((cx, cy)), Some(r)) = (cursor, rects.get(&label)) else { continue };
                 let k = size_scale;

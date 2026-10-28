@@ -70,6 +70,48 @@ pub fn set_click_through(hwnd: isize, on: bool) {
     }
 }
 
+/// Readuce insula deasupra dacă a ajuns sub o fereastră obișnuită (vizibilă, ne-topmost). Se întâmplă când Windows
+/// mută în z-order proprietarul ascuns (`create_hidden_owner`, ne-topmost) și trage după el insula deținută:
+/// `WS_EX_TOPMOST` rămâne pus, dar insula stă în banda ferestrelor normale și nici `HWND_TOPMOST` singur n-o mai
+/// scoate (verificat cu Andrei). Proprietarul la `HWND_TOP`, apoi insula `HWND_NOTOPMOST` și `HWND_TOPMOST` o readuce
+/// dintr-o dată (fără proprietar, cu el la fund, abia a doua încercare reușea). Întoarce true dacă a reparat.
+pub fn keep_on_top(hwnd: isize) -> bool {
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindow, GetWindowLongW, IsWindowVisible, SetWindowPos, GW_HWNDPREV, GW_OWNER, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOPMOST,
+    };
+    if hwnd == 0 {
+        return false;
+    }
+    let me = HWND(hwnd as *mut core::ffi::c_void);
+    unsafe {
+        let mut buried = false;
+        let mut w = GetWindow(me, GW_HWNDPREV).unwrap_or_default();
+        while !w.0.is_null() {
+            if IsWindowVisible(w).as_bool() && GetWindowLongW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == 0 {
+                let mut cloaked = 0u32;
+                let _ = DwmGetWindowAttribute(w, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+                let mut r = RECT::default();
+                if cloaked == 0 && GetWindowRect(w, &mut r).is_ok() && r.right > r.left && r.bottom > r.top {
+                    buried = true;
+                    break;
+                }
+            }
+            w = GetWindow(w, GW_HWNDPREV).unwrap_or_default();
+        }
+        if buried {
+            let f = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+            if let Ok(owner) = GetWindow(me, GW_OWNER) {
+                let _ = SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, f);
+            }
+            let _ = SetWindowPos(me, HWND_NOTOPMOST, 0, 0, 0, 0, f);
+            let _ = SetWindowPos(me, HWND_TOPMOST, 0, 0, 0, 0, f);
+        }
+        buried
+    }
+}
+
 /// Dă insulei focusul de tastatură pentru câmpul de notițe: scoate `WS_EX_NOACTIVATE`, se atașează la
 /// input-ul ferestrei din prim-plan (altfel Windows refuză `SetForegroundWindow`, ca în `focus_hwnd`),
 /// activează insula și îi dă focusul. Întoarce fereastra din prim-plan de dinainte. Doar pe thread-ul
